@@ -1,50 +1,41 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+# Go Double Ratchet Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Spec-Driven Delivery
+Every substantial change MUST begin with Speckit artifacts that define scope, user value, constraints, and acceptance criteria before code generation starts. Planning documents are part of the deliverable, not optional scaffolding.
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+### II. Library-First API Design
+This repository exists to produce a reusable Go library. Public APIs MUST be typed, documented, and minimally opinionated. Wire format, transport, persistence, and application-specific session management MUST remain outside the core library unless a spec explicitly expands scope.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### III. Crypto Conformance Before Convenience
+Protocol behavior MUST track the Signal Double Ratchet specification for the in-scope variant. Cryptographic primitives, state transitions, skipped-key handling, and failure modes MUST be chosen for spec conformance and safety before ergonomics or abstraction reuse.
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+### IV. Test the State Machine
+Protocol and state-transition work MUST be validated with unit and integration coverage for initialization, send/receive progression, ratchet advancement, out-of-order handling, replay rejection, and bounded skipped-key storage. Tests MUST exercise behavior, not only helper functions.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### V. Minimal Surface, Explicit Extensibility
+The initial implementation MUST stay focused on base Double Ratchet functionality. Header encryption, sparse post-quantum ratchets, triple ratchet flows, storage adapters, and transport framing MUST be deferred unless explicitly planned. Extension points MAY be designed, but speculative features MUST NOT leak into the public API.
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+## Additional Constraints
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+- Primary language is Go.
+- Prefer the Go standard library and narrowly scoped cryptographic dependencies.
+- Base Double Ratchet v1 includes section 3 of the Signal specification only.
+- Header encryption, SPQR, and Triple Ratchet are explicitly out of scope for v1.
+- Secure deletion claims in Go MUST be documented as best-effort only.
+- Public APIs MUST expose enough typed structure for callers to serialize messages themselves.
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+## Workflow & Quality Gates
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+- Each feature MUST have `spec.md`, `plan.md`, and `tasks.md` under `specs/`.
+- Crypto-sensitive plans MUST include `research.md`, `data-model.md`, `contracts/`, and `quickstart.md`.
+- A crypto review gate MUST happen before code-generation tasks begin.
+- Planning MUST state invariant fields and error behavior for protocol state.
+- Tasks MUST be organized so the first user story is a demonstrable MVP.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution supersedes ad hoc preferences in this repository. Changes to the constitution require updating dependent templates or plans when those changes alter workflow or quality expectations. Every implementation plan and review should verify compliance with these principles.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-04-21 | **Last Amended**: 2026-04-21
