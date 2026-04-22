@@ -21,3 +21,11 @@ type Message struct {
 	// Ciphertext is the encrypted payload.
 	Ciphertext []byte
 }
+
+// SCKAHeader represents the SPQR message header.
+type SCKAHeader struct {
+	// Msg is the opaque SCKA message data.
+	Msg []byte
+	// N is the message number in the sending chain.
+	N uint32
+}

@@ -1,7 +1,7 @@
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read
-`specs/002-header-encryption/plan.md`
+`specs/003-sparse-pq-ratchet/plan.md`
 <!-- SPECKIT END -->
 
 ## dr-go Agent Requirements

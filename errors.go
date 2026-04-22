@@ -22,3 +22,6 @@ var ErrInvalidTransition = errors.New("invalid state transition")
 
 // ErrSessionNotInitialized is returned when session methods are called on nil session.
 var ErrSessionNotInitialized = errors.New("session not initialized")
+
+// ErrEpochMismatch is returned when epoch advancement is inconsistent.
+var ErrEpochMismatch = errors.New("epoch mismatch")
