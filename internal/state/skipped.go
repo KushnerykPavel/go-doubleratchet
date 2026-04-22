@@ -28,6 +28,75 @@ type Storage struct {
 	mu      sync.Mutex
 }
 
+// Lock acquires the storage mutex.
+func (s *Storage) Lock() {
+	s.mu.Lock()
+}
+
+// Unlock releases the storage mutex.
+func (s *Storage) Unlock() {
+	s.mu.Unlock()
+}
+
+// HDECRYPTFunc is a function that attempts to decrypt an encrypted header.
+type HDECRYPTFunc func(headerKey [32]byte, ciphertext, ad []byte) ([]byte, bool)
+
+// TryAllHeaderKeys iterates through all stored skipped keys and attempts
+// header decryption with each. Returns the message key and true if found.
+// The entry is deleted after successful decryption.
+func (s *Storage) TryAllHeaderKeys(encHeader, ad []byte, decryptFunc HDECRYPTFunc) ([]byte, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for storageKey, entry := range s.entries {
+		var hk [32]byte
+		copy(hk[:], entry.RemoteRatchetPK[:])
+
+		// Try HDECRYPT with this header key.
+		headerBytes, ok := decryptFunc(hk, encHeader, ad)
+		if !ok {
+			continue
+		}
+
+		// Decode header to check n matches.
+		if len(headerBytes) < 40 {
+			continue
+		}
+		// Header format: dh (32 bytes) || pn (4 bytes) || n (4 bytes)
+		n := binary.BigEndian.Uint32(headerBytes[36:40])
+
+		// Check if message number matches.
+		if n != entry.MessageNumber {
+			continue
+		}
+
+		// Found matching skipped key.
+		// Delete entry from MKSKIPPED.
+		delete(s.entries, storageKey)
+
+		// Remove from order list.
+		for i, k := range s.order {
+			if k == storageKey {
+				s.order = append(s.order[:i], s.order[i+1:]...)
+				break
+			}
+		}
+
+		// Copy key before zeroing.
+		keyCopy := make([]byte, 32)
+		copy(keyCopy, entry.MessageKey[:])
+
+		// Zero the entry.
+		for i := range entry.MessageKey {
+			entry.MessageKey[i] = 0
+		}
+
+		return keyCopy, true
+	}
+
+	return nil, false
+}
+
 // NewStorage creates a new skipped-key storage with the given max skip limit.
 func NewStorage(maxSkip uint32) (*Storage, error) {
 	if maxSkip > MaxSkipMax {
@@ -51,6 +120,12 @@ func StorageKey(remotePK [32]byte, messageNumber uint32) string {
 // Store stores a skipped message key. If the storage is at capacity, it evicts
 // the oldest entry. Returns an error if maxSkip would be exceeded after the new entry.
 func (s *Storage) Store(remotePK [32]byte, messageNumber uint32, messageKey [32]byte) error {
+	return s.StoreHK(remotePK, messageNumber, messageKey)
+}
+
+// StoreHK stores a skipped message key indexed by header key.
+// If the storage is at capacity, it evicts the oldest entry.
+func (s *Storage) StoreHK(headerKey [32]byte, messageNumber uint32, messageKey [32]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -58,7 +133,7 @@ func (s *Storage) Store(remotePK [32]byte, messageNumber uint32, messageKey [32]
 		return nil // No storage allowed
 	}
 
-	storageKey := StorageKey(remotePK, messageNumber)
+	storageKey := StorageKeyHK(headerKey, messageNumber)
 
 	// If key already exists, don't store (shouldn't happen in practice).
 	if _, exists := s.entries[storageKey]; !exists {
@@ -68,27 +143,50 @@ func (s *Storage) Store(remotePK [32]byte, messageNumber uint32, messageKey [32]
 			delete(s.entries, evictKey)
 			s.order = s.order[1:]
 		}
-		s.entries[storageKey] = &SkippedKeyEntry{
-			RemoteRatchetPK: remotePK,
-			MessageNumber:   messageNumber,
-			MessageKey:      messageKey,
+		entry := &SkippedKeyEntry{
+			MessageNumber: messageNumber,
+			MessageKey:    messageKey,
 		}
+		copy(entry.RemoteRatchetPK[:], headerKey[:])
+		s.entries[storageKey] = entry
 		s.order = append(s.order, storageKey)
 	}
 	return nil
+}
+
+// StorageKeyHK generates a deterministic storage key for a skipped entry using header key.
+func StorageKeyHK(headerKey [32]byte, messageNumber uint32) string {
+	return StorageKey(headerKey, messageNumber)
 }
 
 // Get retrieves and deletes a skipped message key.
 // Returns the key and true if found, or nil and false if not found.
 // The entry is deleted after retrieval (one-time use).
 func (s *Storage) Get(remotePK [32]byte, messageNumber uint32) ([]byte, bool) {
+	return s.GetHK(remotePK, messageNumber)
+}
+
+// GetHK retrieves and deletes a skipped message key using header key index.
+// Returns the key and true if found, or nil and false if not found.
+// The entry is deleted after retrieval (one-time use).
+// The key is zeroed after copying (secure deletion).
+func (s *Storage) GetHK(headerKey [32]byte, messageNumber uint32) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storageKey := StorageKey(remotePK, messageNumber)
+	storageKey := StorageKeyHK(headerKey, messageNumber)
 	entry, found := s.entries[storageKey]
 	if !found {
 		return nil, false
+	}
+
+	// Copy key to return buffer BEFORE zeroing original.
+	keyCopy := make([]byte, 32)
+	copy(keyCopy, entry.MessageKey[:])
+
+	// Zero original storage (secure deletion).
+	for i := range entry.MessageKey {
+		entry.MessageKey[i] = 0
 	}
 
 	// Delete entry (consume).
@@ -100,10 +198,7 @@ func (s *Storage) Get(remotePK [32]byte, messageNumber uint32) ([]byte, bool) {
 		}
 	}
 
-	// Best-effort secure deletion of the key material.
-	copy(entry.MessageKey[:], make([]byte, 32))
-
-	return entry.MessageKey[:], true
+	return keyCopy, true
 }
 
 // Len returns the number of stored skipped keys.

@@ -52,6 +52,16 @@ type Session struct {
 	// dhRatchetPerformed tracks if DH ratchet was performed since last send.
 	// Used to detect when sending side should perform DH ratchet step.
 	dhRatchetPerformed bool
+
+	// Header encryption keys (from header encryption extension).
+	// HKs is the current sending header key.
+	HKs HeaderKey
+	// HKr is the current receiving header key.
+	HKr HeaderKey
+	// NHKs is the next sending header key.
+	NHKs HeaderKey
+	// NHKr is the next receiving header key.
+	NHKr HeaderKey
 }
 
 // InitAlice initializes a session for Alice (the sender who knows Bob's initial ratchet public key).
@@ -81,14 +91,9 @@ func InitAlice(sharedSecret []byte, bobRatchetPK [32]byte, cfg *Config) (*Sessio
 		return nil, err
 	}
 
-	// Derive root key via HKDF: RK = HKDF(DH output as salt, shared secret as IKM).
-	rk, err := deriveRootKey(dhOut, sharedSecret)
-	if err != nil {
-		return nil, err
-	}
-
-	// Derive sending chain key.
-	cks, err := deriveChainKey(rk)
+	// Per Section 3, Alice derives both RK and CKs from the shared secret and
+	// the first DH output.
+	rk, cks, err := deriveRootAndChain(dhOut, sharedSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -140,12 +145,9 @@ func InitBob(sharedSecret []byte, bobKeyPair crypto.KeyPair, cfg *Config) (*Sess
 	// In the Double Ratchet, Bob's initial state uses the shared secret + his key pair.
 	// The DH ratchet happens when messages arrive.
 
-	// For Bob's initialization: derive RK from shared secret.
-	// The first DH ratchet will happen when Bob receives Alice's first message.
-	rk, err := deriveRootKeyFromSecret(sharedSecret)
-	if err != nil {
-		return nil, err
-	}
+	// Per Section 3, Bob keeps the shared secret as the initial root key and
+	// derives CKr only when Alice's first ratchet public key arrives.
+	rk := append([]byte(nil), sharedSecret...)
 
 	// Initialize skipped key storage.
 	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
@@ -245,8 +247,8 @@ func (s *Session) Decrypt(msg Message, ad []byte) ([]byte, error) {
 			s.rollback()
 			return nil, ErrAuthFailure
 		}
-		// Successfully decrypted a skipped message.
-		s.Nr++
+		// Successfully decrypted a skipped message. Consuming a stored key must
+		// not advance the active receiving-chain counter.
 		return pt, nil
 	}
 
@@ -265,6 +267,11 @@ func (s *Session) Decrypt(msg Message, ad []byte) ([]byte, error) {
 	if msg.Header.N > s.Nr && msg.Header.N-s.Nr > s.Config.EffectiveMaxSkip() {
 		s.rollback()
 		return nil, ErrMaxSkipExceeded
+	}
+
+	if err := s.skipMessageKeys(msg.Header.N); err != nil {
+		s.rollback()
+		return nil, err
 	}
 
 	// Derive message key from receiving chain key.
@@ -358,17 +365,9 @@ func (s *Session) performDHRatchetRecv(header Header) error {
 	// The missed messages are from prevNr to (header.PN - 1) if header.PN > prevNr.
 	// Must derive from previous CKr (before ratchet), not the new CKr.
 	if header.PN > prevNr && prevCKr != nil {
+		tmpCKr := make([]byte, len(prevCKr))
+		copy(tmpCKr, prevCKr)
 		for n := prevNr; n < header.PN; n++ {
-			// Derive message key for skipped message n.
-			// Advance from prevCKr n times to get the key for message n.
-			tmpCKr := make([]byte, len(prevCKr))
-			copy(tmpCKr, prevCKr)
-			for i := uint32(0); i < n; i++ {
-				tmpCKr, _, err = kdf.ChainKDFDerive(tmpCKr)
-				if err != nil {
-					return err
-				}
-			}
 			msgKey, err := kdf.DeriveMessageKey(tmpCKr)
 			if err != nil {
 				return err
@@ -377,6 +376,10 @@ func (s *Session) performDHRatchetRecv(header Header) error {
 			copy(mk[:], msgKey)
 			// Store indexed by prevDHr (the remote PK before the ratchet).
 			if err := s.MKSKIPPED.Store(prevDHr, n, mk); err != nil {
+				return err
+			}
+			tmpCKr, _, err = kdf.ChainKDFDerive(tmpCKr)
+			if err != nil {
 				return err
 			}
 		}
@@ -391,6 +394,35 @@ func (s *Session) performDHRatchetRecv(header Header) error {
 	return nil
 }
 
+// skipMessageKeys stores skipped message keys from the current receiving chain
+// until the target message number is reached.
+func (s *Session) skipMessageKeys(until uint32) error {
+	if s.CKr == nil {
+		return nil
+	}
+
+	for s.Nr < until {
+		msgKey, err := kdf.DeriveMessageKey(s.CKr)
+		if err != nil {
+			return err
+		}
+
+		var mk [32]byte
+		copy(mk[:], msgKey)
+		if err := s.MKSKIPPED.Store(s.DHr, s.Nr, mk); err != nil {
+			return err
+		}
+
+		s.CKr, _, err = kdf.ChainKDFDerive(s.CKr)
+		if err != nil {
+			return err
+		}
+		s.Nr++
+	}
+
+	return nil
+}
+
 // deriveRecvMessageKey derives the message key for receive message number n.
 // The receiving chain key CKr must already be set.
 func (s *Session) deriveRecvMessageKey(n uint32) ([]byte, error) {
@@ -398,15 +430,14 @@ func (s *Session) deriveRecvMessageKey(n uint32) ([]byte, error) {
 		return nil, ErrInvalidTransition
 	}
 
-	// Derive chain keys for each message in the receiving chain up to n.
-	// The message key for message n is the n-th message key derived from CKr.
+	// Derive chain keys from the current receive position up to message n.
 	ckr := make([]byte, len(s.CKr))
 	copy(ckr, s.CKr)
 
 	var msgKey []byte
 	var err error
 
-	for i := uint32(0); i <= n; i++ {
+	for i := s.Nr; i <= n; i++ {
 		if i == n {
 			msgKey, err = kdf.DeriveMessageKey(ckr)
 			if err != nil {
