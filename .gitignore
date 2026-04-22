@@ -2,3 +2,4 @@
 .opencode/
 opencode.json
 specs/
+.tmp/

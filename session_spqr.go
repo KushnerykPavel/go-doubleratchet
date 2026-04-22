@@ -381,7 +381,7 @@ func encryptMessageSPQR(key, plaintext []byte, header *SCKAHeader, ad []byte) ([
 	aesKey, macKey := deriveMessageKeysSPQR(key)
 	combinedKey := append(aesKey, macKey...)
 
-	combinedAD := append(headerBytes, ad...)
+	combinedAD := append(append([]byte(nil), ad...), headerBytes...)
 
 	return suite.Encrypt(combinedKey, plaintext, combinedAD)
 }
@@ -396,7 +396,7 @@ func decryptMessageSPQR(key, ciphertext []byte, header *SCKAHeader, ad []byte) (
 	aesKey, macKey := deriveMessageKeysSPQR(key)
 	combinedKey := append(aesKey, macKey...)
 
-	combinedAD := append(headerBytes, ad...)
+	combinedAD := append(append([]byte(nil), ad...), headerBytes...)
 
 	return suite.Decrypt(combinedKey, ciphertext, combinedAD)
 }

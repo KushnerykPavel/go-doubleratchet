@@ -3,11 +3,14 @@ package doubleratchet
 
 import (
 	"crypto/subtle"
+	"crypto/sha256"
+	"io"
 
 	"doubleratchet/internal/crypto"
 	"doubleratchet/internal/kdf"
 	"doubleratchet/internal/state"
 	"doubleratchet/internal/suite"
+	"golang.org/x/crypto/hkdf"
 )
 
 const (
@@ -537,23 +540,16 @@ func deriveChainKey(rk []byte) ([]byte, error) {
 // Returns new root key, new chain key.
 // Per Signal spec: RK_{i+1} = HKDF(DH(DHr_i, DHs_{i+1}), RK_i) where DH output is salt, RK_i is IKM.
 func deriveRootAndChain(dhOutput, currentRK []byte) ([]byte, []byte, error) {
-	// DH output is salt, current RK is IKM.
-	r := kdf.NewRootKDF(dhOutput, nil)
-	if err := r.Derive(currentRK); err != nil {
-		return nil, nil, err
-	}
-	newRK, err := r.Expand(nil, RootKeySize)
-	if err != nil {
+	okm := make([]byte, RootKeySize+ChainKeySize)
+	reader := hkdf.New(sha256.New, dhOutput, currentRK, nil)
+	if _, err := io.ReadFull(reader, okm); err != nil {
 		return nil, nil, err
 	}
 
-	// Derive new chain key from new root key.
-	newCK, err := deriveChainKey(newRK)
-	if err != nil {
-		return nil, nil, err
-	}
+	newRK := okm[:RootKeySize]
+	newCK := okm[RootKeySize:]
 
-	return newRK, newCK, nil
+	return append([]byte(nil), newRK...), append([]byte(nil), newCK...), nil
 }
 
 // deriveMessageKey derives a message key from a chain key.
@@ -574,7 +570,7 @@ func encryptMessage(key, plaintext, header, ad []byte) ([]byte, error) {
 	combinedKey := append(aesKey, macKey...)
 
 	// Build AD from header.
-	combinedAD := append(header, ad...)
+	combinedAD := append(append([]byte(nil), ad...), header...)
 
 	return suite.Encrypt(combinedKey, plaintext, combinedAD)
 }
@@ -584,7 +580,7 @@ func decryptMessage(key, ciphertext, header, ad []byte) ([]byte, error) {
 	aesKey, macKey := suite.DeriveKeys(key, "DoubleratchetMessage")
 	combinedKey := append(aesKey, macKey...)
 
-	combinedAD := append(header, ad...)
+	combinedAD := append(append([]byte(nil), ad...), header...)
 
 	return suite.Decrypt(combinedKey, ciphertext, combinedAD)
 }

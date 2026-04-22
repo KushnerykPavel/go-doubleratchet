@@ -2,9 +2,14 @@ package doubleratchet
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"io"
 	"testing"
 
 	"doubleratchet/internal/crypto"
+	"doubleratchet/internal/suite"
+	"golang.org/x/crypto/hkdf"
 )
 
 func TestPreviousChainDelayedMessageDecrypts(t *testing.T) {
@@ -126,4 +131,71 @@ func TestSameChainDelayedMessageDecrypts(t *testing.T) {
 	if bob.Nr != nrBeforeDelayed {
 		t.Fatalf("Nr changed after delayed same-chain decrypt: got %d want %d", bob.Nr, nrBeforeDelayed)
 	}
+}
+
+func TestDeriveRootAndChainUsesCurrentRootKeyAsHKDFSalt(t *testing.T) {
+	dhOut := bytes.Repeat([]byte{0x11}, 32)
+	currentRK := bytes.Repeat([]byte{0x22}, 32)
+
+	gotRK, gotCK, err := deriveRootAndChain(dhOut, currentRK)
+	if err != nil {
+		t.Fatalf("deriveRootAndChain failed: %v", err)
+	}
+
+	okm := make([]byte, 64)
+	reader := hkdf.New(sha256.New, dhOut, currentRK, nil)
+	if _, err := io.ReadFull(reader, okm); err != nil {
+		t.Fatalf("hkdf read failed: %v", err)
+	}
+
+	wantRK := okm[:32]
+	wantCK := okm[32:]
+
+	if !bytes.Equal(gotRK, wantRK) {
+		t.Fatalf("root key mismatch\n got: %x\nwant: %x", gotRK, wantRK)
+	}
+	if !bytes.Equal(gotCK, wantCK) {
+		t.Fatalf("chain key mismatch\n got: %x\nwant: %x", gotCK, wantCK)
+	}
+}
+
+func TestEncryptMessageAuthenticatesADBeforeHeader(t *testing.T) {
+	key := bytes.Repeat([]byte{0x33}, 32)
+	plaintext := []byte("hello")
+	header := []byte("header")
+	ad := []byte("ad")
+
+	ciphertext, err := encryptMessage(key, plaintext, header, ad)
+	if err != nil {
+		t.Fatalf("encryptMessage failed: %v", err)
+	}
+
+	if _, err := decryptMessage(key, ciphertext, header, ad); err != nil {
+		t.Fatalf("decryptMessage failed with matching inputs: %v", err)
+	}
+
+	aesKey, macKey := deriveSuiteKeysForTest(key, "DoubleratchetMessage")
+	combinedKey := append(aesKey, macKey...)
+
+	if _, err := suite.Decrypt(combinedKey, ciphertext, append(ad, header...)); err != nil {
+		t.Fatalf("suite decrypt failed for spec AD ordering: %v", err)
+	}
+
+	if _, err := suite.Decrypt(combinedKey, ciphertext, append(header, ad...)); err == nil {
+		t.Fatal("suite decrypt unexpectedly succeeded for legacy AD ordering")
+	}
+}
+
+func deriveSuiteKeysForTest(masterKey []byte, label string) (aesKey, macKey []byte) {
+	h := hmac.New(sha256.New, masterKey)
+	h.Write([]byte(label))
+	h.Write([]byte("aes"))
+	aesKey = h.Sum(nil)
+
+	h = hmac.New(sha256.New, masterKey)
+	h.Write([]byte(label))
+	h.Write([]byte("mac"))
+	macKey = h.Sum(nil)
+
+	return aesKey, macKey
 }

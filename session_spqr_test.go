@@ -3,12 +3,16 @@ package doubleratchet
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"crypto/subtle"
+	"io"
 	"testing"
 
 	"doubleratchet/internal/kdf"
 	"doubleratchet/internal/scka"
 	"doubleratchet/internal/state"
+	"doubleratchet/internal/suite"
+	"golang.org/x/crypto/hkdf"
 )
 
 // TestInitAliceSCKA tests that InitAliceSCKA creates correct initial state.
@@ -370,6 +374,17 @@ func TestKDFSCKAINIT(t *testing.T) {
 	if bytes.Equal(cks, ckr) {
 		t.Error("CKs and CKr should be different")
 	}
+
+	okm := hkdfExpandForTest(t, make([]byte, 32), sk, []byte("SPQR_PROTOCOL_INFOChain Start"), 96)
+	if !bytes.Equal(rk, okm[:32]) {
+		t.Fatalf("RK mismatch\n got: %x\nwant: %x", rk, okm[:32])
+	}
+	if !bytes.Equal(cks, okm[32:64]) {
+		t.Fatalf("CKs mismatch\n got: %x\nwant: %x", cks, okm[32:64])
+	}
+	if !bytes.Equal(ckr, okm[64:96]) {
+		t.Fatalf("CKr mismatch\n got: %x\nwant: %x", ckr, okm[64:96])
+	}
 }
 
 // TestKDFSCKARK tests KDF_SCKA_RK derivation.
@@ -402,6 +417,17 @@ func TestKDFSCKARK(t *testing.T) {
 	// All should be different from input.
 	if bytes.Equal(newRK, rk) {
 		t.Error("newRK should differ from input RK")
+	}
+
+	okm := hkdfExpandForTest(t, rk, sckaOutput, []byte("SPQR_PROTOCOL_INFOChain Add Epoch"), 96)
+	if !bytes.Equal(newRK, okm[:32]) {
+		t.Fatalf("newRK mismatch\n got: %x\nwant: %x", newRK, okm[:32])
+	}
+	if !bytes.Equal(cks, okm[32:64]) {
+		t.Fatalf("CKs mismatch\n got: %x\nwant: %x", cks, okm[32:64])
+	}
+	if !bytes.Equal(ckr, okm[64:96]) {
+		t.Fatalf("CKr mismatch\n got: %x\nwant: %x", ckr, okm[64:96])
 	}
 }
 
@@ -441,6 +467,57 @@ func TestKDFSCKACK(t *testing.T) {
 	if bytes.Equal(mk, mk2) {
 		t.Error("mk for ctr=0 and ctr=1 should differ")
 	}
+
+	okm := hkdfExpandForTest(t, make([]byte, 32), ck, append([]byte("SPQR_PROTOCOL_INFOMessage Keys"), 0, 0, 0, 0), 64)
+	if !bytes.Equal(nextCK, okm[:32]) {
+		t.Fatalf("nextCK mismatch\n got: %x\nwant: %x", nextCK, okm[:32])
+	}
+	if !bytes.Equal(mk, okm[32:64]) {
+		t.Fatalf("mk mismatch\n got: %x\nwant: %x", mk, okm[32:64])
+	}
+}
+
+func TestEncryptMessageSPQRAuthenticatesADBeforeHeader(t *testing.T) {
+	key := bytes.Repeat([]byte{0x44}, 32)
+	plaintext := []byte("pq")
+	header := &SCKAHeader{Msg: []byte("msg"), N: 7}
+	ad := []byte("ad")
+
+	ciphertext, err := encryptMessageSPQR(key, plaintext, header, ad)
+	if err != nil {
+		t.Fatalf("encryptMessageSPQR failed: %v", err)
+	}
+
+	if _, err := decryptMessageSPQR(key, ciphertext, header, ad); err != nil {
+		t.Fatalf("decryptMessageSPQR failed with matching inputs: %v", err)
+	}
+
+	headerBytes, err := encodeSCKAHeader(header)
+	if err != nil {
+		t.Fatalf("encodeSCKAHeader failed: %v", err)
+	}
+
+	aesKey, macKey := deriveMessageKeysSPQR(key)
+	combinedKey := append(aesKey, macKey...)
+
+	if _, err := suite.Decrypt(combinedKey, ciphertext, append(ad, headerBytes...)); err != nil {
+		t.Fatalf("suite decrypt failed for spec AD ordering: %v", err)
+	}
+
+	if _, err := suite.Decrypt(combinedKey, ciphertext, append(headerBytes, ad...)); err == nil {
+		t.Fatal("suite decrypt unexpectedly succeeded for legacy AD ordering")
+	}
+}
+
+func hkdfExpandForTest(t *testing.T, salt, ikm, info []byte, length int) []byte {
+	t.Helper()
+
+	reader := hkdf.New(sha256.New, ikm, salt, info)
+	out := make([]byte, length)
+	if _, err := io.ReadFull(reader, out); err != nil {
+		t.Fatalf("hkdf read failed: %v", err)
+	}
+	return out
 }
 
 // TestTrySkippedMessageKeys tests TrySkippedMessageKeys retrieval.
