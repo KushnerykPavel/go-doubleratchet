@@ -1,10 +1,11 @@
-// Package x3dh implements the X3DH (Extended Triple Diffie-Hellman) key agreement
-// protocol per the Signal specification at https://signal.org/docs/specifications/x3dh/.
+// Package pqxdh implements the PQXDH (Post-Quantum Extended Diffie-Hellman)
+// key agreement protocol per the Signal specification at
+// https://signal.org/docs/specifications/pqxdh/.
 //
-// X3DH establishes a shared secret between two parties (Alice and Bob) without
-// requiring Bob to be online. The output feeds directly into the Double Ratchet
-// via doubleratchet.InitAlice / doubleratchet.InitBob.
-package x3dh
+// PQXDH extends X3DH by adding a post-quantum KEM (ML-KEM) to the handshake,
+// providing resistance against "harvest now, decrypt later" quantum attacks.
+// The output feeds directly into the Double Ratchet and SPQR ratchets.
+package pqxdh
 
 import (
 	"errors"
@@ -16,32 +17,35 @@ import (
 // output, indicating the peer provided a low-order point.
 var ErrZeroSharedSecret = ecutil.ErrZeroSharedSecret
 
+// ErrInvalidPublicKey is returned when a received public key fails
+// canonical or torsion-free validation.
+var ErrInvalidPublicKey = ecutil.ErrInvalidPublicKey
+
 // ErrInvalidSPKSignature is returned when the signed prekey signature in a
 // PrekeyBundle fails XEdDSA verification.
-var ErrInvalidSPKSignature = errors.New("x3dh: invalid signed prekey signature")
+var ErrInvalidSPKSignature = errors.New("pqxdh: invalid signed prekey signature")
+
+// ErrInvalidPQPreKeySignature is returned when the PQ prekey signature in a
+// PrekeyBundle fails XEdDSA verification.
+var ErrInvalidPQPreKeySignature = errors.New("pqxdh: invalid PQ prekey signature")
 
 // IdentityKey is a long-term X25519 key pair used for authentication.
-// Generate with GenerateIdentityKey.
 type IdentityKey struct {
 	PrivateKey [32]byte
 	PublicKey  [32]byte
 }
 
 // SignedPreKey is a semi-static X25519 key pair. The Signature is an XEdDSA
-// signature over PublicKey made with the owner's IdentityKey, allowing recipients
-// to verify authenticity without an online exchange.
-// Generate with GenerateSPK.
+// signature over PublicKey made with the owner's IdentityKey.
 type SignedPreKey struct {
 	PrivateKey [32]byte
 	PublicKey  [32]byte
 	KeyID      uint32
-	Signature  [64]byte // XEdDSA(IdentityKey.PrivateKey, PublicKey[:])
+	Signature  [64]byte
 }
 
 // OneTimePreKey is a single-use X25519 key pair that provides an additional
-// DH contribution (DH4) for enhanced forward secrecy. Once used, both parties
-// must discard it.
-// Generate with GenerateOPK.
+// DH contribution (DH4) for enhanced forward secrecy.
 type OneTimePreKey struct {
 	PrivateKey [32]byte
 	PublicKey  [32]byte
@@ -78,7 +82,3 @@ func GenerateOPK(keyID uint32) (OneTimePreKey, error) {
 	}
 	return OneTimePreKey{PrivateKey: priv, PublicKey: pub, KeyID: keyID}, nil
 }
-
-// ErrInvalidPublicKey is returned when a received public key fails
-// canonical or torsion-free validation.
-var ErrInvalidPublicKey = ecutil.ErrInvalidPublicKey

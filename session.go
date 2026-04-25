@@ -10,7 +10,7 @@ import (
 
 	"github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
 	"github.com/KushnerykPavel/go-doubleratchet/internal/kdf"
-	state2 "github.com/KushnerykPavel/go-doubleratchet/internal/state"
+	"github.com/KushnerykPavel/go-doubleratchet/internal/state"
 	"github.com/KushnerykPavel/go-doubleratchet/internal/suite"
 )
 
@@ -25,10 +25,10 @@ const (
 
 // Session represents a Double Ratchet session state.
 type Session struct {
-	invariants         *state2.Invariants
+	invariants         *state.Invariants
 	config             *Config
-	mkSkipped          *state2.Storage
-	recvChains         *state2.ReceiverChains
+	mkSkipped          *state.Storage
+	recvChains         *state.ReceiverChains
 	rk                 []byte
 	cks                []byte
 	ns                 uint32
@@ -72,7 +72,7 @@ func InitInitiator(sharedSecret []byte, bobRatchetPK [32]byte, cfg *Config) (*Se
 		return nil, err
 	}
 
-	sk, err := state2.NewStorage(cfg.EffectiveMaxSkip())
+	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
 	if err != nil {
 		return nil, err
 	}
@@ -80,14 +80,14 @@ func InitInitiator(sharedSecret []byte, bobRatchetPK [32]byte, cfg *Config) (*Se
 	return &Session{
 		rk:                 rk,
 		cks:                cks,
-		recvChains:         state2.NewReceiverChains(),
+		recvChains:         state.NewReceiverChains(),
 		dhs:                dhsPriv,
 		dhr:                bobRatchetPK,
 		ns:                 0,
 		pn:                 0,
 		mkSkipped:          sk,
 		config:             cfg,
-		invariants:         state2.NewInvariants(),
+		invariants:         state.NewInvariants(),
 		dhRatchetPerformed: false,
 		dhRSet:             true, // Initiator knows Responder's key from initialization
 	}, nil
@@ -116,7 +116,7 @@ func InitResponder(sharedSecret []byte, bobKeyPair crypto.KeyPair, cfg *Config) 
 
 	rk := append([]byte(nil), sharedSecret[:32]...)
 
-	sk, err := state2.NewStorage(cfg.EffectiveMaxSkip())
+	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
 	if err != nil {
 		return nil, err
 	}
@@ -124,14 +124,14 @@ func InitResponder(sharedSecret []byte, bobKeyPair crypto.KeyPair, cfg *Config) 
 	return &Session{
 		rk:         rk,
 		cks:        nil,
-		recvChains: state2.NewReceiverChains(),
+		recvChains: state.NewReceiverChains(),
 		dhs:        bobKeyPair.PrivateKey,
 		dhr:        [32]byte{},
 		ns:         0,
 		pn:         0,
 		mkSkipped:  sk,
 		config:     cfg,
-		invariants: state2.NewInvariants(),
+		invariants: state.NewInvariants(),
 		dhRSet:     false, // Responder has not yet received Initiator's first message
 	}, nil
 }
@@ -499,7 +499,7 @@ func (s *Session) performDHRatchetRecv(header Header) error {
 
 // skipMessageKeys stores skipped message keys up to the target message number.
 // Chain must be non-nil and is the chain for recvPK.
-func (s *Session) skipMessageKeys(recvPK [32]byte, chain *state2.ReceiverChain, until uint32) error {
+func (s *Session) skipMessageKeys(recvPK [32]byte, chain *state.ReceiverChain, until uint32) error {
 	for chain.Nr < until {
 		msgKey, err := kdf.DeriveMessageKey(chain.CK)
 		if err != nil {
@@ -527,7 +527,7 @@ func (s *Session) skipMessageKeys(recvPK [32]byte, chain *state2.ReceiverChain, 
 
 // deriveRecvMessageKey derives the message key for message number n.
 // Chain must be non-nil. Advances chain.CK past message n.
-func (s *Session) deriveRecvMessageKey(recvPK [32]byte, chain *state2.ReceiverChain, n uint32) ([]byte, error) {
+func (s *Session) deriveRecvMessageKey(recvPK [32]byte, chain *state.ReceiverChain, n uint32) ([]byte, error) {
 	_ = recvPK // retained for clarity; callers already validated the chain lookup
 
 	if chain.CK == nil {

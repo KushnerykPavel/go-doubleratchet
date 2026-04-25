@@ -5,8 +5,9 @@ import (
 	"fmt"
 	"io"
 
-	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/hkdf"
+
+	"github.com/KushnerykPavel/go-doubleratchet/internal/ecutil"
 )
 
 // PrekeyBundle is Bob's public prekey bundle, typically published to a server.
@@ -46,25 +47,25 @@ const x3dhInfo = "X3DH"
 // The ephemeral private key is zeroed before this function returns.
 func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult, InitialMessage, error) {
 	// Validate received public keys before any computation.
-	if err := validatePublicKey(bundle.IdentityKey); err != nil {
+	if err := ecutil.ValidatePublicKey(bundle.IdentityKey); err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: bundle identity key: %w", err)
 	}
-	if err := validatePublicKey(bundle.SignedPreKey); err != nil {
+	if err := ecutil.ValidatePublicKey(bundle.SignedPreKey); err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: bundle signed prekey: %w", err)
 	}
 	if bundle.OneTimePreKey != nil {
-		if err := validatePublicKey(*bundle.OneTimePreKey); err != nil {
+		if err := ecutil.ValidatePublicKey(*bundle.OneTimePreKey); err != nil {
 			return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: bundle one-time prekey: %w", err)
 		}
 	}
 
 	// Verify SPK signature before any DH computation.
-	if !xeddsaVerify(bundle.IdentityKey, bundle.SignedPreKey[:], bundle.SPKSignature) {
+	if !ecutil.XEdDSAVerify(bundle.IdentityKey, bundle.SignedPreKey[:], bundle.SPKSignature) {
 		return HandshakeResult{}, InitialMessage{}, ErrInvalidSPKSignature
 	}
 
 	// Generate a per-session ephemeral key pair.
-	ekPriv, ekPub, err := generateX25519KeyPair()
+	ekPriv, ekPub, err := ecutil.GenerateX25519KeyPair()
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: ephemeral key generation: %w", err)
 	}
@@ -76,17 +77,17 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 	}()
 
 	// DH1 = DH(IKA_priv, SPKB_pub)
-	dh1, err := dhX25519(senderIK.PrivateKey, bundle.SignedPreKey)
+	dh1, err := ecutil.DHX25519(senderIK.PrivateKey, bundle.SignedPreKey)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: DH1: %w", err)
 	}
 	// DH2 = DH(EKA_priv, IKB_pub)
-	dh2, err := dhX25519(ekPriv, bundle.IdentityKey)
+	dh2, err := ecutil.DHX25519(ekPriv, bundle.IdentityKey)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: DH2: %w", err)
 	}
 	// DH3 = DH(EKA_priv, SPKB_pub)
-	dh3, err := dhX25519(ekPriv, bundle.SignedPreKey)
+	dh3, err := ecutil.DHX25519(ekPriv, bundle.SignedPreKey)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: DH3: %w", err)
 	}
@@ -95,7 +96,7 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 	var opkID *uint32
 	if bundle.OneTimePreKey != nil {
 		// DH4 = DH(EKA_priv, OPKB_pub)
-		dh4, err = dhX25519(ekPriv, *bundle.OneTimePreKey)
+		dh4, err = ecutil.DHX25519(ekPriv, *bundle.OneTimePreKey)
 		if err != nil {
 			return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: DH4: %w", err)
 		}
@@ -123,25 +124,25 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 // After ReceiveHandshake returns successfully, the caller must discard the used OPK.
 func ReceiveHandshake(receiverIK IdentityKey, spk *SignedPreKey, opk *OneTimePreKey, msg InitialMessage) (HandshakeResult, error) {
 	// Validate received public keys before any computation.
-	if err := validatePublicKey(msg.IdentityKey); err != nil {
+	if err := ecutil.ValidatePublicKey(msg.IdentityKey); err != nil {
 		return HandshakeResult{}, fmt.Errorf("x3dh: sender identity key: %w", err)
 	}
-	if err := validatePublicKey(msg.EphemeralKey); err != nil {
+	if err := ecutil.ValidatePublicKey(msg.EphemeralKey); err != nil {
 		return HandshakeResult{}, fmt.Errorf("x3dh: sender ephemeral key: %w", err)
 	}
 
 	// DH1 = DH(SPKB_priv, IKA_pub)
-	dh1, err := dhX25519(spk.PrivateKey, msg.IdentityKey)
+	dh1, err := ecutil.DHX25519(spk.PrivateKey, msg.IdentityKey)
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("x3dh: DH1: %w", err)
 	}
 	// DH2 = DH(IKB_priv, EKA_pub)
-	dh2, err := dhX25519(receiverIK.PrivateKey, msg.EphemeralKey)
+	dh2, err := ecutil.DHX25519(receiverIK.PrivateKey, msg.EphemeralKey)
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("x3dh: DH2: %w", err)
 	}
 	// DH3 = DH(SPKB_priv, EKA_pub)
-	dh3, err := dhX25519(spk.PrivateKey, msg.EphemeralKey)
+	dh3, err := ecutil.DHX25519(spk.PrivateKey, msg.EphemeralKey)
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("x3dh: DH3: %w", err)
 	}
@@ -152,7 +153,7 @@ func ReceiveHandshake(receiverIK IdentityKey, spk *SignedPreKey, opk *OneTimePre
 			return HandshakeResult{}, fmt.Errorf("x3dh: message uses OPK %d but none provided", *msg.OPKID)
 		}
 		// DH4 = DH(OPKB_priv, EKA_pub)
-		dh4, err = dhX25519(opk.PrivateKey, msg.EphemeralKey)
+		dh4, err = ecutil.DHX25519(opk.PrivateKey, msg.EphemeralKey)
 		if err != nil {
 			return HandshakeResult{}, fmt.Errorf("x3dh: DH4: %w", err)
 		}
@@ -167,25 +168,6 @@ func ReceiveHandshake(receiverIK IdentityKey, spk *SignedPreKey, opk *OneTimePre
 		SharedSecret: sk,
 		AD:           buildAD(msg.IdentityKey, receiverIK.PublicKey),
 	}, nil
-}
-
-// dhX25519 computes DH(priv, pub) and rejects low-order points.
-func dhX25519(priv, pub [32]byte) ([]byte, error) {
-	ss, err := curve25519.X25519(priv[:], pub[:])
-	if err != nil {
-		return nil, err
-	}
-	var allZero = true
-	for _, b := range ss {
-		if b != 0 {
-			allZero = false
-			break
-		}
-	}
-	if allZero {
-		return nil, ErrZeroSharedSecret
-	}
-	return ss, nil
 }
 
 // deriveX3DHSK computes SK = HKDF-SHA256(salt=0x00×32, ikm=F‖DH1‖DH2‖DH3[‖DH4], info="X3DH", len=32).
