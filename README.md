@@ -5,8 +5,9 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/KushnerykPavel/go-doubleratchet)](https://goreportcard.com/report/github.com/KushnerykPavel/go-doubleratchet)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-Go implementation of the Signal Double Ratchet protocol family:
+Go implementation of the Signal protocol family:
 
+- **X3DH** key agreement (Extended Triple Diffie-Hellman)
 - Base Double Ratchet (Signal spec section 3)
 - Double Ratchet with header encryption (section 4)
 - Sparse Post-Quantum Ratchet / SPQR (section 5)
@@ -20,6 +21,7 @@ Go implementation of the Signal Double Ratchet protocol family:
 
 - [Install](#install)
 - [Which Mode Should I Use?](#which-mode-should-i-use)
+- [X3DH Key Agreement](#x3dh-key-agreement)
 - [Base Double Ratchet](#base-double-ratchet)
 - [Header Encryption](#header-encryption)
 - [Sparse Post-Quantum Ratchet](#sparse-post-quantum-ratchet)
@@ -55,7 +57,72 @@ Requires Go 1.25.0 or later (see `go.mod`).
 | SPQR | `*doubleratchet.SPQRSession` | You need post-quantum ratcheting without per-message PQ key exchange. | Requires a production `scka.Provider`. |
 | Triple Ratchet | `*doubleratchet.TripleRatchetSession` | You want hybrid classical and post-quantum security. | Carries both EC and SCKA header data. |
 
-All modes take an initial 32-byte-or-longer shared secret from an external handshake such as X3DH or PQXDH. The library does not implement the handshake itself.
+All modes take an initial 32-byte shared secret. Use the `x3dh` sub-package (included) to derive that secret via the Signal X3DH handshake, or supply one from your own handshake.
+
+## X3DH Key Agreement
+
+The `x3dh` sub-package implements the [Signal X3DH specification](https://signal.org/docs/specifications/x3dh/) — the asynchronous key agreement that produces the shared secret used to seed the Double Ratchet. Bob can be offline when Alice initiates.
+
+```go
+import (
+    doubleratchet "github.com/KushnerykPavel/go-doubleratchet"
+    "github.com/KushnerykPavel/go-doubleratchet/x3dh"
+)
+
+// --- Bob: generate and publish a prekey bundle ---
+
+bobIK, _  := x3dh.GenerateIdentityKey()
+bobSPK, _ := x3dh.GenerateSPK(bobIK, 1)   // signed prekey (rotate periodically)
+bobOPK, _ := x3dh.GenerateOPK(1)           // one-time prekey (optional, discard after use)
+
+bundle := &x3dh.PrekeyBundle{
+    IdentityKey:   bobIK.PublicKey,
+    SignedPreKey:  bobSPK.PublicKey,
+    SPKID:         bobSPK.KeyID,
+    SPKSignature:  bobSPK.Signature,
+    OneTimePreKey: &bobOPK.PublicKey,
+    OPKID:         &bobOPK.KeyID,
+}
+
+// --- Alice: fetch bundle, run handshake ---
+
+aliceIK, _          := x3dh.GenerateIdentityKey()
+aliceResult, initMsg, _ := x3dh.SendHandshake(aliceIK, bundle)
+// Send initMsg to Bob alongside the first Double Ratchet message.
+
+// --- Bob: receive and complete handshake ---
+
+bobResult, _ := x3dh.ReceiveHandshake(bobIK, &bobSPK, &bobOPK, initMsg)
+// bobResult.SharedSecret == aliceResult.SharedSecret
+
+// --- Both sides: seed the Double Ratchet ---
+
+// Alice uses Bob's SPK as the initial DR ratchet key (Signal convention).
+aliceSess, _ := doubleratchet.InitAlice(aliceResult.SharedSecret[:], bobSPK.PublicKey, nil)
+bobRatchetKP := doubleratchet.KeyPair{PrivateKey: bobSPK.PrivateKey, PublicKey: bobSPK.PublicKey}
+bobSess, _   := doubleratchet.InitBob(bobResult.SharedSecret[:], bobRatchetKP, nil)
+
+ad := aliceResult.AD // IKA_pub ‖ IKB_pub
+msg, _      := aliceSess.Encrypt([]byte("hello"), ad)
+plaintext, _ := bobSess.Decrypt(msg, ad)
+```
+
+**Key types:**
+
+| Type | Role | Lifetime |
+|---|---|---|
+| `IdentityKey` | Long-term authentication anchor | Persistent |
+| `SignedPreKey` | Semi-static DH contributor, XEdDSA-signed | Rotate periodically |
+| `OneTimePreKey` | Single-use forward-secrecy boost | Discard after one use |
+
+**Errors:**
+
+| Error | Meaning |
+|---|---|
+| `x3dh.ErrInvalidSPKSignature` | SPK signature verification failed; bundle may be tampered. |
+| `x3dh.ErrZeroSharedSecret` | A DH computation returned all zeros; low-order point attack. |
+
+X3DH output `AD` (`IKA_pub ‖ IKB_pub`) should be passed as the `ad` argument to every `Encrypt`/`Decrypt` call for transcript binding.
 
 ## Base Double Ratchet
 
@@ -396,6 +463,7 @@ The root package re-exports everything most applications need. These sub-package
 
 | Package | Import path | Purpose |
 |---|---|---|
+| `x3dh` | `go-doubleratchet/x3dh` | X3DH key agreement: key generation, XEdDSA signatures, `SendHandshake`/`ReceiveHandshake`. |
 | `crypto` | `go-doubleratchet/crypto` | X25519 key generation, DH shared secret, header encryption primitives (`HENCRYPT`/`HDECRYPT`). |
 | `kdf` | `go-doubleratchet/kdf` | Chain KDF, root KDF, HE root KDF, SPQR KDF functions. |
 | `scka` | `go-doubleratchet/scka` | `Provider` interface for post-quantum SCKA implementations. |
