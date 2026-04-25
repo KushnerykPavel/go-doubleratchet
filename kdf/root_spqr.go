@@ -1,3 +1,4 @@
+// Package kdf provides SPQR-specific key derivation functions.
 package kdf
 
 import (
@@ -18,9 +19,9 @@ var (
 // ErrInvalidInput is returned for invalid inputs.
 var ErrInvalidInput = errors.New("invalid input")
 
-// SCKAInit derives initial RK, CKs, CKr from SK.
+// KDF_SCKA_INIT derives initial RK, CKs, CKr from SK.
 // Returns (rk, cks, ckr) each 32 bytes.
-func SCKAInit(sk []byte) (rk, cks, ckr []byte, err error) {
+func KDF_SCKA_INIT(sk []byte) (rk, cks, ckr []byte, err error) {
 	if len(sk) < 32 {
 		return nil, nil, nil, ErrInvalidInput
 	}
@@ -33,8 +34,8 @@ func SCKAInit(sk []byte) (rk, cks, ckr []byte, err error) {
 	return splitTriple(okm)
 }
 
-// SCKARatchetRK derives new RK, CKs, CKr from current RK and SCKA output.
-func SCKARatchetRK(rk, sckaOutput []byte) (newRK, cks, ckr []byte, err error) {
+// KDF_SCKA_RK derives new RK, CKs, CKr from current RK and SCKA output.
+func KDF_SCKA_RK(rk, sckaOutput []byte) (newRK, cks, ckr []byte, err error) {
 	if len(rk) < 32 || len(sckaOutput) < 32 {
 		return nil, nil, nil, ErrInvalidInput
 	}
@@ -47,8 +48,8 @@ func SCKARatchetRK(rk, sckaOutput []byte) (newRK, cks, ckr []byte, err error) {
 	return splitTriple(okm)
 }
 
-// SCKARatchetCK derives next chain key and message key from current chain key.
-func SCKARatchetCK(ck []byte, ctr uint32) (nextCK, mk []byte, err error) {
+// KDF_SCKA_CK derives next chain key and message key from current chain key.
+func KDF_SCKA_CK(ck []byte, ctr uint32) (nextCK, mk []byte, err error) {
 	if len(ck) < 32 {
 		return nil, nil, ErrInvalidInput
 	}
@@ -56,9 +57,9 @@ func SCKARatchetCK(ck []byte, ctr uint32) (nextCK, mk []byte, err error) {
 	info := make([]byte, len(messageKeysInfo)+4)
 	copy(info, messageKeysInfo)
 	info[len(messageKeysInfo)] = byte(ctr >> 24)
-	info[len(messageKeysInfo)+1] = byte(ctr >> 16) //nolint:gosec // uint32 shift fits in byte
-	info[len(messageKeysInfo)+2] = byte(ctr >> 8)  //nolint:gosec // uint32 shift fits in byte
-	info[len(messageKeysInfo)+3] = byte(ctr)       //nolint:gosec // uint32 low byte fits in byte
+	info[len(messageKeysInfo)+1] = byte(ctr >> 16)
+	info[len(messageKeysInfo)+2] = byte(ctr >> 8)
+	info[len(messageKeysInfo)+3] = byte(ctr)
 
 	okm, err := hkdfExpand(make([]byte, 32), ck, info, 64)
 	if err != nil {

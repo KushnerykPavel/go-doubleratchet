@@ -1,3 +1,4 @@
+// Package crypto provides tests for header encryption primitives.
 package crypto
 
 import (
@@ -38,7 +39,7 @@ func TestHeaderNonceMonotonicity(t *testing.T) {
 	header[0] = 0xA1
 
 	ciphertexts := make([][]byte, 5)
-	for i := range 5 {
+	for i := 0; i < 5; i++ {
 		ct, err := HENCRYPT(&hk, header)
 		require.NoError(t, err)
 		ciphertexts[i] = ct
@@ -50,7 +51,7 @@ func TestHeaderNonceMonotonicity(t *testing.T) {
 	}
 
 	// All ciphertexts must decrypt correctly.
-	for i := range 5 {
+	for i := 0; i < 5; i++ {
 		pt, ok := HDECRYPT(hk.Key, ciphertexts[i])
 		require.True(t, ok, "HDECRYPT failed at iteration %d", i)
 		require.Equal(t, header, pt)
@@ -118,39 +119,4 @@ func TestHDECRYPTZeroedKeyFails(t *testing.T) {
 	pt, ok := HDECRYPT(zeroedKey, ct)
 	require.False(t, ok, "HDECRYPT should fail with zeroed key")
 	require.Nil(t, pt)
-}
-
-var benchKey = HeaderKey{
-	Key:          [32]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20},
-	NonceCounter: 0,
-}
-
-var benchHeader = make([]byte, 40)
-
-func BenchmarkHENCRYPT(b *testing.B) {
-	b.ReportAllocs()
-	hk := benchKey
-	for b.Loop() {
-		_, err := HENCRYPT(&hk, benchHeader)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkHDECRYPT(b *testing.B) {
-	b.ReportAllocs()
-	hk := benchKey
-	ct, err := HENCRYPT(&hk, benchHeader)
-	if err != nil {
-		b.Fatal(err)
-	}
-	key := hk.Key
-	b.ResetTimer()
-	for b.Loop() {
-		_, ok := HDECRYPT(key, ct)
-		if !ok {
-			b.Fatal("HDECRYPT failed")
-		}
-	}
 }

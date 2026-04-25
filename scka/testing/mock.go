@@ -1,43 +1,40 @@
-// Package scka provides a mock SCKA implementation for testing.
-package scka
+// Package sckatest provides mock implementations of scka.Provider for testing.
+package sckatest
 
 import (
 	"crypto/hmac"
 	"crypto/sha256"
 )
 
-// MockSCKA is a mock implementation of SCKAProvider for testing.
+// MockSCKA is a mock implementation of scka.Provider for testing.
 type MockSCKA struct {
-	// SharedKey is the shared secret.
-	SharedKey []byte
-
-	// SendCount tracks number of Send() calls.
-	SendCount int
-
-	// ReceiveCount tracks number of Receive() calls.
-	ReceiveCount int
-
-	// SendEpoch is the epoch sent in each Send().
-	SendEpoch uint32
-
-	// KeyEpoch is the epoch for new key material.
-	KeyEpoch uint32
-
-	// OutputKey is the key material produced (nil to simulate no new key).
-	OutputKey []byte
-
-	// InitializedAs tracks initialization: "alice", "bob", or "".
 	InitializedAs string
-
-	// SkipBeforeKey if set, Send() returns nil outputKey for first N calls.
+	SharedKey     []byte
+	OutputKey     []byte
+	SendCount     int
+	ReceiveCount  int
 	SkipBeforeKey int
+	SendEpoch     uint32
+	KeyEpoch      uint32
 }
 
-// InitAlice initializes the mock SCKA for Alice.
-func (m *MockSCKA) InitAlice(sk []byte) error {
+// mockSCKASnapshot holds a deep copy of MockSCKA state for rollback.
+type mockSCKASnapshot struct {
+	initializedAs string
+	sharedKey     []byte
+	outputKey     []byte
+	sendCount     int
+	receiveCount  int
+	skipBeforeKey int
+	sendEpoch     uint32
+	keyEpoch      uint32
+}
+
+// InitInitiator initializes the mock SCKA for the Initiator.
+func (m *MockSCKA) InitInitiator(sk []byte) error {
 	m.SharedKey = make([]byte, len(sk))
 	copy(m.SharedKey, sk)
-	m.InitializedAs = "alice"
+	m.InitializedAs = "initiator"
 	m.SendCount = 0
 	m.ReceiveCount = 0
 	m.SendEpoch = 0
@@ -45,11 +42,11 @@ func (m *MockSCKA) InitAlice(sk []byte) error {
 	return nil
 }
 
-// InitBob initializes the mock SCKA for Bob.
-func (m *MockSCKA) InitBob(sk []byte) error {
+// InitResponder initializes the mock SCKA for the Responder.
+func (m *MockSCKA) InitResponder(sk []byte) error {
 	m.SharedKey = make([]byte, len(sk))
 	copy(m.SharedKey, sk)
-	m.InitializedAs = "bob"
+	m.InitializedAs = "responder"
 	m.SendCount = 0
 	m.ReceiveCount = 0
 	m.SendEpoch = 0
@@ -65,7 +62,7 @@ func (m *MockSCKA) Send() (msg []byte, sendingEpoch uint32, outputKey []byte, ke
 	msg = make([]byte, 32)
 	h := hmac.New(sha256.New, m.SharedKey)
 	h.Write([]byte("send"))
-	h.Write([]byte{byte(m.SendCount)})
+	h.Write([]byte{byte(m.SendCount & 0xFF)})
 	copy(msg, h.Sum(nil)[:32])
 
 	sendingEpoch = m.SendEpoch
@@ -80,7 +77,7 @@ func (m *MockSCKA) Send() (msg []byte, sendingEpoch uint32, outputKey []byte, ke
 		// Derive a consistent key based on KeyEpoch.
 		h = hmac.New(sha256.New, m.OutputKey)
 		h.Write([]byte("key"))
-		h.Write([]byte{byte(m.KeyEpoch)})
+		h.Write([]byte{byte(m.KeyEpoch & 0xFF)})
 		outputKey = make([]byte, 32)
 		copy(outputKey, h.Sum(nil)[:32])
 		keyEpoch = m.KeyEpoch
@@ -104,13 +101,48 @@ func (m *MockSCKA) Receive(msg []byte) (receivingEpoch uint32, outputKey []byte,
 	if m.OutputKey != nil {
 		h := hmac.New(sha256.New, m.OutputKey)
 		h.Write([]byte("key"))
-		h.Write([]byte{byte(m.KeyEpoch)})
+		h.Write([]byte{byte(m.KeyEpoch & 0xFF)})
 		outputKey = make([]byte, 32)
 		copy(outputKey, h.Sum(nil)[:32])
 		keyEpoch = m.KeyEpoch
 	}
 
 	return receivingEpoch, outputKey, keyEpoch, nil
+}
+
+// Snapshot captures the current MockSCKA state for rollback.
+func (m *MockSCKA) Snapshot() any {
+	snap := &mockSCKASnapshot{
+		sendCount:     m.SendCount,
+		receiveCount:  m.ReceiveCount,
+		sendEpoch:     m.SendEpoch,
+		keyEpoch:      m.KeyEpoch,
+		initializedAs: m.InitializedAs,
+		skipBeforeKey: m.SkipBeforeKey,
+	}
+	if m.SharedKey != nil {
+		snap.sharedKey = append([]byte(nil), m.SharedKey...)
+	}
+	if m.OutputKey != nil {
+		snap.outputKey = append([]byte(nil), m.OutputKey...)
+	}
+	return snap
+}
+
+// Restore reverts MockSCKA state to a previously captured snapshot.
+func (m *MockSCKA) Restore(snapshot any) {
+	snap, ok := snapshot.(*mockSCKASnapshot)
+	if !ok {
+		return
+	}
+	m.SharedKey = snap.sharedKey
+	m.SendCount = snap.sendCount
+	m.ReceiveCount = snap.receiveCount
+	m.SendEpoch = snap.sendEpoch
+	m.KeyEpoch = snap.keyEpoch
+	m.OutputKey = snap.outputKey
+	m.InitializedAs = snap.initializedAs
+	m.SkipBeforeKey = snap.skipBeforeKey
 }
 
 // SetOutputKey configures the mock to produce a specific output key.
@@ -121,6 +153,21 @@ func (m *MockSCKA) SetOutputKey(key []byte) {
 // SetKeyEpoch sets the epoch for new key material.
 func (m *MockSCKA) SetKeyEpoch(epoch uint32) {
 	m.KeyEpoch = epoch
+}
+
+// Close zeros all key material in the mock SCKA provider.
+func (m *MockSCKA) Close() error {
+	for i := range m.SharedKey {
+		m.SharedKey[i] = 0
+	}
+	for i := range m.OutputKey {
+		m.OutputKey[i] = 0
+	}
+	m.SharedKey = nil
+	m.OutputKey = nil
+	m.SendCount = 0
+	m.ReceiveCount = 0
+	return nil
 }
 
 // SetSendEpoch sets the sending epoch.

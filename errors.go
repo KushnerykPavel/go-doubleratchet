@@ -1,4 +1,3 @@
-// Package doubleratchet implements the base Signal Double Ratchet algorithm.
 package doubleratchet
 
 import (

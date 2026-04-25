@@ -1,3 +1,4 @@
+// Package crypto provides header encryption primitives for the Double Ratchet.
 package crypto
 
 import (
@@ -26,7 +27,7 @@ const (
 )
 
 var (
-	// HeaderKeyInfo is the HKDF info constant for header key derivation.
+	// headerKeyInfo is the HKDF info constant for header key derivation.
 	headerKeyInfo = []byte("DoubleRatchetHeaderKey")
 )
 
@@ -39,19 +40,11 @@ var ErrInvalidHeaderKey = errors.New("invalid header key")
 // ErrInvalidNonceCounter is returned when the nonce counter would overflow.
 var ErrInvalidNonceCounter = errors.New("invalid nonce counter")
 
-// Sentinel errors for pkcs7Unpad.
-var (
-	errEmptyData         = errors.New("empty data")
-	errInvalidBlockSize  = errors.New("invalid block size")
-	errInvalidPadding    = errors.New("invalid padding")
-	errInvalidPaddingVal = errors.New("invalid padding value")
-)
-
 // HENCRYPT encrypts a header using AES-256-CBC + HMAC-SHA256.
 //
 // Per spec §4.2: HENCRYPT(hk, plaintext) — no associated data parameter.
-// Hk is the header key with a stateful nonce counter.
-// Header is the plaintext header bytes.
+// hk is the header key with a stateful nonce counter.
+// header is the plaintext header bytes.
 // Returns encrypted header: nonce (16 bytes) || AES-CBC ciphertext || HMAC tag (32 bytes).
 // Increments hk.NonceCounter after use.
 func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
@@ -95,8 +88,8 @@ func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
 // HDECRYPT decrypts an encrypted header.
 //
 // Per spec §4.2: HDECRYPT(hk, ciphertext) — no associated data parameter.
-// Hk is the 32-byte header key.
-// Ciphertext is the encrypted header from HENCRYPT.
+// hk is the 32-byte header key.
+// ciphertext is the encrypted header from HENCRYPT.
 // Returns (plaintext, true) on success, (nil, false) on failure or zeroed key.
 func HDECRYPT(hk [32]byte, ciphertext []byte) ([]byte, bool) {
 	if isZeroed(hk[:]) {
@@ -137,16 +130,16 @@ func HDECRYPT(hk [32]byte, ciphertext []byte) ([]byte, bool) {
 	return plaintext, true
 }
 
-func deriveHeaderKeys(headerKey, info []byte) (aesKey, macKey []byte) {
+func deriveHeaderKeys(headerKey []byte, info []byte) ([]byte, []byte) {
 	h := hmac.New(sha256.New, headerKey)
 	h.Write(info)
 	h.Write([]byte("aes"))
-	aesKey = h.Sum(nil)
+	aesKey := h.Sum(nil)
 
 	h = hmac.New(sha256.New, headerKey)
 	h.Write(info)
 	h.Write([]byte("mac"))
-	macKey = h.Sum(nil)
+	macKey := h.Sum(nil)
 
 	return aesKey, macKey
 }
@@ -164,25 +157,25 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 	padding := blockSize - (len(data) % blockSize)
 	pad := make([]byte, padding)
 	for i := range pad {
-		pad[i] = byte(padding) //nolint:gosec // padding bounded by blockSize (≤16)
+		pad[i] = byte(padding)
 	}
 	return append(data, pad...)
 }
 
 func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
 	if len(data) == 0 {
-		return nil, errEmptyData
+		return nil, errors.New("empty data")
 	}
 	if len(data)%blockSize != 0 {
-		return nil, errInvalidBlockSize
+		return nil, errors.New("invalid block size")
 	}
 	padding := int(data[len(data)-1])
 	if padding == 0 || padding > blockSize {
-		return nil, errInvalidPadding
+		return nil, errors.New("invalid padding")
 	}
 	for i := len(data) - padding; i < len(data); i++ {
-		if data[i] != byte(padding) { //nolint:gosec // padding bounded by blockSize (≤16)
-			return nil, errInvalidPaddingVal
+		if data[i] != byte(padding) {
+			return nil, errors.New("invalid padding value")
 		}
 	}
 	return data[:len(data)-padding], nil

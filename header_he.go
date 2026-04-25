@@ -1,7 +1,8 @@
-// Package doubleratchet provides header encryption types for the Double Ratchet.
 package doubleratchet
 
-import "doubleratchet/internal/crypto"
+import (
+	"github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
+)
 
 // HeaderKey represents a header encryption/decryption key with nonce counter.
 // Alias for internal crypto HeaderKey for API exposure.

@@ -1,3 +1,4 @@
+// Package state provides epoch-based state types for SPQR.
 package state
 
 // Direction indicates the message flow direction.

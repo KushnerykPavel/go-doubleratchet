@@ -13,9 +13,6 @@ const (
 	MaxSkipMax = 100000
 )
 
-// ErrMaxSkipTooLarge is returned when the requested MaxSkip exceeds MaxSkipMax.
-var ErrMaxSkipTooLarge = errors.New("max skip too large")
-
 // SkippedKeyEntry stores a skipped message key indexed by remote ratchet key and message number.
 type SkippedKeyEntry struct {
 	RemoteRatchetPK [32]byte
@@ -25,26 +22,10 @@ type SkippedKeyEntry struct {
 
 // Storage implements bounded skipped-key storage.
 type Storage struct {
-	entries map[string]*SkippedKeyEntry
-	order   []string
-	mu      sync.Mutex
 	maxSkip uint32
-}
-
-// HDECRYPTFunc is a function that attempts to decrypt an encrypted header.
-// Per spec §4.2: HDECRYPT takes only (headerKey, ciphertext) — no AD.
-type HDECRYPTFunc func(headerKey [32]byte, ciphertext []byte) ([]byte, bool)
-
-// NewStorage creates a new skipped-key storage with the given max skip limit.
-func NewStorage(maxSkip uint32) (*Storage, error) {
-	if maxSkip > MaxSkipMax {
-		return nil, ErrMaxSkipTooLarge
-	}
-	return &Storage{
-		maxSkip: maxSkip,
-		entries: make(map[string]*SkippedKeyEntry),
-		order:   make([]string, 0, maxSkip),
-	}, nil
+	entries map[string]*SkippedKeyEntry
+	order   []string // insertion order for eviction
+	mu      sync.Mutex
 }
 
 // Lock acquires the storage mutex.
@@ -56,6 +37,10 @@ func (s *Storage) Lock() {
 func (s *Storage) Unlock() {
 	s.mu.Unlock()
 }
+
+// HDECRYPTFunc is a function that attempts to decrypt an encrypted header.
+// Per spec §4.2: HDECRYPT takes only (headerKey, ciphertext) — no AD.
+type HDECRYPTFunc func(headerKey [32]byte, ciphertext []byte) ([]byte, bool)
 
 // TryAllHeaderKeys iterates through all stored skipped keys and attempts
 // header decryption with each. Returns the message key and true if found.
@@ -113,6 +98,18 @@ func (s *Storage) TryAllHeaderKeys(encHeader []byte, decryptFunc HDECRYPTFunc) (
 	return nil, false
 }
 
+// NewStorage creates a new skipped-key storage with the given max skip limit.
+func NewStorage(maxSkip uint32) (*Storage, error) {
+	if maxSkip > MaxSkipMax {
+		return nil, errors.New("max skip too large")
+	}
+	return &Storage{
+		maxSkip: maxSkip,
+		entries: make(map[string]*SkippedKeyEntry),
+		order:   make([]string, 0, maxSkip),
+	}, nil
+}
+
 // StorageKey generates a deterministic storage key for a skipped entry.
 func StorageKey(remotePK [32]byte, messageNumber uint32) string {
 	var key [32 + 4]byte
@@ -142,7 +139,7 @@ func (s *Storage) StoreHK(headerKey [32]byte, messageNumber uint32, messageKey [
 	// If key already exists, don't store (shouldn't happen in practice).
 	if _, exists := s.entries[storageKey]; !exists {
 		// Evict oldest if at capacity.
-		if uint32(len(s.entries)) >= s.maxSkip { //nolint:gosec // len cannot exceed uint32 max in practice
+		if uint32(len(s.entries)) >= s.maxSkip {
 			evictKey := s.order[0]
 			delete(s.entries, evictKey)
 			s.order = s.order[1:]

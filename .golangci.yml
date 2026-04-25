@@ -1,0 +1,164 @@
+version: "2"
+
+linters:
+  default: all
+  disable:
+    # Style — not enforced in a crypto library
+    - nlreturn
+    - wsl_v5
+    - wsl               # deprecated; replaced by wsl_v5
+    - godox             # allow TODO during active development
+    - exhaustruct       # not requiring every struct field initialized
+    - nonamedreturns    # named returns used intentionally in some helpers
+    - noinlineerr       # inline if err := ...; err != nil is idiomatic Go
+    - varnamelen        # short names like n, rk, ck are idiomatic in crypto
+    - ireturn           # SCKAProvider intentionally returns interfaces
+    - gochecknoglobals  # sentinel errors (ErrAuthFailure etc.) are package-level vars
+    - gochecknoinits    # no init() present, but not enforced
+    - depguard          # no import restrictions needed
+    - goheader          # no file header requirement
+    - testpackage       # internal test files (same package) are intentional
+    - paralleltest      # session tests are stateful; parallel corrupts state
+    - tparallel         # same reason
+    - funlen            # ratchet logic functions are legitimately long
+    - cyclop            # covered by gocyclo
+    - maintidx          # informational only
+    - dupl              # Alice/Bob init patterns are structurally similar by design
+    - mnd               # 32-byte key sizes are domain constants, not magic numbers
+    - lll               # long lines acceptable in comment blocks
+    - wrapcheck         # internal errors don't need external wrapping
+    - gosmopolitan      # not an i18n project
+    - tagliatelle       # no struct tag naming conventions required
+    - musttag           # no JSON marshaling in this library
+    - exhaustive        # no enum switches
+    - gochecksumtype    # no sum types
+    - interfacebloat    # SCKAProvider has 6 methods by design
+    - inamedparam       # unnamed interface params acceptable for crypto primitives
+    - embeddedstructfieldcheck  # no embedded structs
+    - iotamixing        # no iota usage
+    - arangolint        # not using arangodb
+    - ginkgolinter      # not using ginkgo
+    - promlinter        # no prometheus metrics
+    - protogetter       # no protobuf
+    - rowserrcheck      # no database/sql
+    - sqlclosecheck     # no database/sql
+    - noctx             # no context.Context in crypto primitives (correct)
+    - spancheck         # no OpenTelemetry
+    - sloglint          # no slog usage
+    - loggercheck       # no logger usage
+    - zerologlint       # no zerolog usage
+    - nosprintfhostport # no URL construction
+    - unqueryvet        # no SQL
+
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+
+    gosec:
+      excludes:
+        - G401  # AES-CBC is spec-mandated (Signal DR §7), not weak in this context
+        - G501  # suppress blanket import check; no weak hash imports present
+      confidence: medium
+
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+        - style
+      disabled-checks:
+        - commentedOutCode
+
+    gocyclo:
+      min-complexity: 20  # ratchet state machines are inherently branchy
+
+    gocognit:
+      min-complexity: 30
+
+    nestif:
+      min-complexity: 6
+
+    nakedret:
+      max-func-lines: 0  # disallow naked returns entirely
+
+    revive:
+      rules:
+        - name: exported
+        - name: var-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: blank-imports
+        - name: context-as-argument
+        - name: dot-imports
+        - name: empty-block
+        - name: superfluous-else
+        - name: unexported-return
+        - name: unreachable-code
+        - name: unused-parameter
+          disabled: true  # SCKAProvider methods have required signatures
+
+    staticcheck:
+      checks:
+        - all
+
+    govet:
+      enable-all: true
+      disable:
+        - shadow  # shadowing checked by revive
+
+    unparam:
+      check-exported: false  # exported API signatures are stable
+
+    testifylint:
+      enable-all: true
+
+    godot:
+      scope: declarations  # exported godoc comments must end with period
+      capital: true
+
+    misspell:
+      locale: US
+
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+
+  exclusions:
+    rules:
+      # Test files: relax security and complexity checks
+      - path: _test\.go
+        linters:
+          - gosec
+          - gocritic
+          - gocyclo
+          - gocognit
+          - nestif
+          - errcheck
+
+      # Mock implementations: complexity acceptable
+      - path: scka/testing/mock\.go
+        linters:
+          - gocyclo
+          - gocognit
+
+      # Internal crypto: low-level byte manipulation expected
+      - path: internal/crypto/
+        linters:
+          - gocritic
+
+      # Suite package: PKCS7 padding validation is necessarily branchy
+      - path: internal/suite/
+        linters:
+          - gocyclo
+          - nestif
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/KushnerykPavel/go-doubleratchet

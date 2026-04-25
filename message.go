@@ -1,4 +1,3 @@
-// Package doubleratchet provides typed message structures for the Double Ratchet.
 package doubleratchet
 
 // Header represents the base Double Ratchet message header.
@@ -15,11 +14,8 @@ type Header struct {
 
 // Message represents an encrypted Double Ratchet message.
 type Message struct {
-	// Header is the message header.
-	Header Header
-
-	// Ciphertext is the encrypted payload.
 	Ciphertext []byte
+	Header     Header
 }
 
 // SCKAHeader represents the SPQR message header.
@@ -28,4 +24,19 @@ type SCKAHeader struct {
 	Msg []byte
 	// N is the message number in the sending chain.
 	N uint32
+}
+
+// TripleRatchetHeader contains both the EC (Double Ratchet) and PQ (SCKA) header components.
+// Used by the Triple Ratchet to carry state for both protocol components.
+type TripleRatchetHeader struct {
+	SCKA *SCKAHeader
+	EC   Header
+}
+
+// TripleRatchetMessage is a ciphertext produced by the Triple Ratchet.
+type TripleRatchetMessage struct {
+	// Ciphertext is the authenticated-encrypted payload.
+	Ciphertext []byte
+	// Header contains both EC and PQ routing information.
+	Header TripleRatchetHeader
 }

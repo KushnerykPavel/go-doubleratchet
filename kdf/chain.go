@@ -1,3 +1,4 @@
+// Package kdf provides chain key derivation for the Double Ratchet.
 package kdf
 
 import (
@@ -17,10 +18,10 @@ type ChainKDF struct {
 }
 
 var (
-	// chainConstant is used in chain key derivation (Signal spec: 0x02).
-	chainConstant = []byte{0x02}
-	// messageKeyConstant is used to derive a message key from a chain key (Signal spec: 0x01).
-	messageKeyConstant = []byte{0x01}
+	// chainConstant is used in chain key derivation (Signal spec: 0x01).
+	chainConstant = []byte{0x01}
+	// messageKeyConstant is used to derive a message key from a chain key (Signal spec: 0x02).
+	messageKeyConstant = []byte{0x02}
 )
 
 // NewChainKDF creates a ChainKDF with the given master chain key.
@@ -47,8 +48,8 @@ func DeriveMessageKey(chainKey []byte) ([]byte, error) {
 
 // DeriveNextChainKey derives the next chain key AND the message key in one step.
 // Both are derived from the same input chainKey per the Signal spec:
-//   - messageKey   = HMAC(chainKey, 0x01)
-//   - nextChainKey = HMAC(chainKey, 0x02)
+//   - nextChainKey = HMAC(chainKey, 0x01)
+//   - messageKey   = HMAC(chainKey, 0x02)
 func DeriveNextChainKey(chainKey []byte) (nextChainKey, messageKey []byte, err error) {
 	h := hmac.New(sha256.New, chainKey)
 	h.Write(chainConstant)
@@ -58,7 +59,7 @@ func DeriveNextChainKey(chainKey []byte) (nextChainKey, messageKey []byte, err e
 	h.Write(messageKeyConstant)
 	messageKey = h.Sum(nil)
 
-	return nextChainKey, messageKey, nil
+	return
 }
 
 // ChainKDFDerive performs chain KDF in one call.

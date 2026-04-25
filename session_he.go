@@ -1,224 +1,201 @@
-// Package doubleratchet provides header encryption session methods for the Double Ratchet.
 package doubleratchet
 
 import (
 	"crypto/subtle"
 
-	"doubleratchet/internal/crypto"
-	"doubleratchet/internal/kdf"
-	"doubleratchet/internal/state"
+	crypto2 "github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
+	kdf2 "github.com/KushnerykPavel/go-doubleratchet/internal/kdf"
+	state2 "github.com/KushnerykPavel/go-doubleratchet/internal/state"
+	"github.com/KushnerykPavel/go-doubleratchet/internal/suite"
 )
 
-// InitAliceHE initializes a session for Alice with header encryption.
-// sharedSecret is the initial shared secret (32+ bytes).
-// bobRatchetPK is Bob's initial ratchet public key (32 bytes).
-// sharedHKA is Alice's initial header key (32 bytes).
-// sharedNHKB is Bob's initial next header key (32 bytes).
-// cfg is the session configuration (may be nil for defaults).
-func InitAliceHE(sharedSecret []byte, bobRatchetPK [32]byte, sharedHKA [32]byte, sharedNHKB [32]byte, cfg *Config) (*Session, error) {
-	if len(sharedSecret) < 32 {
-		return nil, ErrInvalidInput
-	}
-	if cfg == nil {
-		cfg = &Config{MaxSkip: DefaultMaxSkip}
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-
-	// Generate Alice's ratchet key pair.
-	dhsPriv, _, err := crypto.GenerateKeyPair()
-	if err != nil {
-		return nil, err
-	}
-
-	// Compute DH output: DH(DHs.Private, DHr.Public).
-	dhOut, err := crypto.SharedSecret(dhsPriv, bobRatchetPK)
-	if err != nil {
-		return nil, err
-	}
-
-	// Derive RK, CKs, NHKs via KDF_RK_HE per Section 4.4 spec.
-	// Use sharedSecret as the keying material for HKDF.
-	rk, cks, nhks, err := kdf.KDF_RK_HE(sharedSecret[:32], dhOut)
-	if err != nil {
-		return nil, err
-	}
-
-	// Convert CKs from []byte to bytes type if needed (deriveChainKey returns same type).
-	cksBytes := cks
-
-	// Initialize skipped key storage.
-	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
-	if err != nil {
-		return nil, err
-	}
-
-	s := &Session{
-		RK:                  rk,
-		CKs:                 cksBytes,
-		CKr:                 nil,
-		DHs:                 dhsPriv,
-		DHr:                 bobRatchetPK,
-		Ns:                  0,
-		Nr:                  0,
-		PN:                  0,
-		MKSKIPPED:           sk,
-		Config:              cfg,
-		invariants:          state.NewInvariants(),
-		dhRatchetPerformed: false,
-		// Header encryption keys.
-		HKs:  crypto.HeaderKey{Key: sharedHKA, NonceCounter: 0},
-		HKr:  crypto.HeaderKey{Key: [32]byte{}, NonceCounter: 0},
-		NHKs: crypto.HeaderKey{Key: nhks, NonceCounter: 0},
-		NHKr: crypto.HeaderKey{Key: sharedNHKB, NonceCounter: 0},
-	}
-
-	return s, nil
+// HESession is a Double Ratchet session with header encryption (spec §4).
+// Use InitInitiatorHE/InitResponderHE to create one.
+// Do not call Encrypt/Decrypt on HESession — use EncryptHE/DecryptHE instead.
+type HESession struct {
+	// Session embeds the base Double Ratchet state.
+	// Accessing s.Session directly and calling Session.Encrypt/Decrypt on it
+	// is unsupported and produces ciphertext incompatible with any standard receiver.
+	Session
+	// hks is the current sending header key.
+	hks HeaderKey
+	// hkr is the current receiving header key.
+	hkr HeaderKey
+	// nhks is the next sending header key.
+	nhks HeaderKey
+	// nhkr is the next receiving header key.
+	nhkr HeaderKey
 }
 
-// InitBobHE initializes a session for Bob with header encryption.
-// sharedSecret is the initial shared secret (32+ bytes).
-// bobKeyPair is Bob's ratchet key pair.
-// sharedHKA is Alice's initial header key (32 bytes).
-// sharedNHKB is Bob's initial next header key (32 bytes).
-// cfg is the session configuration (may be nil for defaults).
-func InitBobHE(sharedSecret []byte, bobKeyPair crypto.KeyPair, sharedHKA [32]byte, sharedNHKB [32]byte, cfg *Config) (*Session, error) {
-	if len(sharedSecret) < 32 {
-		return nil, ErrInvalidInput
-	}
-	if cfg == nil {
-		cfg = &Config{MaxSkip: DefaultMaxSkip}
-	}
-	if err := cfg.Validate(); err != nil {
-		return nil, err
-	}
-	if !crypto.VerifyPublicKey(bobKeyPair.PublicKey) {
-		return nil, ErrInvalidInput
-	}
-
-	// Bob keeps the shared secret as the initial HE root key so the first
-	// receive-side derivation matches Alice's initial send-side derivation.
-	rk := append([]byte(nil), sharedSecret...)
-
-	// Initialize skipped key storage.
-	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
-	if err != nil {
-		return nil, err
-	}
-
-	s := &Session{
-		RK:         rk,
-		CKs:        nil, // Bob's sending chain is set on first encrypt
-		CKr:        nil, // Will be set on first decrypt (DH ratchet)
-		DHs:        bobKeyPair.PrivateKey,
-		DHr:        [32]byte{}, // DHr is zeroed until first message from Alice arrives
-		Ns:         0,
-		Nr:         0,
-		PN:         0,
-		MKSKIPPED:  sk,
-		Config:     cfg,
-		invariants: state.NewInvariants(),
-		// Header encryption keys.
-		HKs:  crypto.HeaderKey{Key: [32]byte{}, NonceCounter: 0},
-		HKr:  crypto.HeaderKey{Key: [32]byte{}, NonceCounter: 0},
-		NHKs: crypto.HeaderKey{Key: sharedNHKB, NonceCounter: 0},
-		NHKr: crypto.HeaderKey{Key: sharedHKA, NonceCounter: 0},
-	}
-
-	return s, nil
+// Encrypt is not valid on HESession. Use EncryptHE instead.
+func (s *HESession) Encrypt(_, _ []byte) (Message, error) {
+	return Message{}, ErrInvalidTransition
 }
 
-// DHRatchetHE performs a DH ratchet step with header key rotation.
-// Called when a new remote ratchet public key is received.
-func (s *Session) DHRatchetHE(header Header) error {
-	// Save PN = Ns, then reset Ns and Nr.
-	s.PN = s.Ns
-	s.Ns = 0
-	s.Nr = 0
+// Decrypt is not valid on HESession. Use DecryptHE instead.
+func (s *HESession) Decrypt(_ Message, _ []byte) ([]byte, error) {
+	return nil, ErrInvalidTransition
+}
 
-	// Advance header keys: HKs = NHKs, HKr = NHKr.
-	s.HKs = s.NHKs
-	s.HKr = s.NHKr
-
-	// Step 1: DH(DHs, DHr) - compute shared secret with current remote key.
-	dhOut, err := crypto.SharedSecret(s.DHs, header.RatchetPublicKey)
-	if err != nil {
+// Close zeros all key material in the session, rendering it unusable.
+func (s *HESession) Close() error {
+	if err := s.Session.Close(); err != nil {
 		return err
 	}
-
-	// Derive new RK, CKr, NHKr.
-	newRK, ckr, nhkr, err := kdf.KDF_RK_HE(s.RK, dhOut)
-	if err != nil {
-		return err
+	for i := range s.hks.Key {
+		s.hks.Key[i] = 0
 	}
-	s.RK = newRK
-	s.CKr = ckr
-	s.NHKr.Key = nhkr
-
-	// Generate new DHs key pair.
-	newPriv, _, err := crypto.GenerateKeyPair()
-	if err != nil {
-		return err
+	for i := range s.hkr.Key {
+		s.hkr.Key[i] = 0
 	}
-
-	// Update DHs with new key pair.
-	s.DHs = newPriv
-
-	// Step 2: DH(DHs, DHr) with new DHs and current DHr.
-	dhOut2, err := crypto.SharedSecret(s.DHs, s.DHr)
-	if err != nil {
-		return err
+	for i := range s.nhks.Key {
+		s.nhks.Key[i] = 0
 	}
-
-	// Derive new RK, CKs, NHKs.
-	newRK, cks, nhks, err := kdf.KDF_RK_HE(s.RK, dhOut2)
-	if err != nil {
-		return err
+	for i := range s.nhkr.Key {
+		s.nhkr.Key[i] = 0
 	}
-	s.RK = newRK
-	s.CKs = cks
-	s.NHKs.Key = nhks
-
-	// Update DHr to the new remote public key from header.
-	s.DHr = header.RatchetPublicKey
-
 	return nil
 }
 
-// SkipMessageKeysHE stores skipped message keys indexed by HKr.Key.
-// Takes header containing PN (previous chain length).
-func (s *Session) SkipMessageKeysHE(pn uint32) error {
-	if s.CKr == nil {
-		return nil
+// InitInitiatorHE initializes an HESession for the Initiator.
+// SharedSecret is the initial shared secret (32+ bytes); only the first 32 are used.
+func InitInitiatorHE(sharedSecret []byte, bobRatchetPK, sharedHKA, sharedNHKB [32]byte, cfg *Config) (*HESession, error) {
+	if len(sharedSecret) < 32 {
+		return nil, ErrInvalidInput
+	}
+	if cfg == nil {
+		cfg = &Config{MaxSkip: DefaultMaxSkip}
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
-	for s.Nr < pn {
-		msgKey, err := kdf.DeriveMessageKey(s.CKr)
+	dhsPriv, _, err := crypto2.GenerateKeyPair()
+	if err != nil {
+		return nil, err
+	}
+
+	dhOut, err := crypto2.SharedSecret(dhsPriv, bobRatchetPK)
+	if err != nil {
+		return nil, err
+	}
+
+	rk, cks, nhks, err := kdf2.RRKHE(sharedSecret[:32], dhOut, cfg.effectiveHEKDFInfo())
+	if err != nil {
+		return nil, err
+	}
+
+	sk, err := state2.NewStorage(cfg.EffectiveMaxSkip())
+	if err != nil {
+		return nil, err
+	}
+
+	return &HESession{
+		Session: Session{
+			rk:                 rk,
+			cks:                cks,
+			recvChains:         state2.NewReceiverChains(),
+			dhs:                dhsPriv,
+			dhr:                bobRatchetPK,
+			ns:                 0,
+			pn:                 0,
+			mkSkipped:          sk,
+			config:             cfg,
+			invariants:         state2.NewInvariants(),
+			dhRatchetPerformed: false,
+			dhRSet:             true, // Initiator knows Responder's key from initialization
+		},
+		hks:  crypto2.HeaderKey{Key: sharedHKA, NonceCounter: 0},
+		hkr:  crypto2.HeaderKey{Key: [32]byte{}, NonceCounter: 0},
+		nhks: crypto2.HeaderKey{Key: nhks, NonceCounter: 0},
+		nhkr: crypto2.HeaderKey{Key: sharedNHKB, NonceCounter: 0},
+	}, nil
+}
+
+// InitResponderHE initializes an HESession for the Responder.
+// SharedSecret is the initial shared secret (32+ bytes); only the first 32 are used.
+func InitResponderHE(sharedSecret []byte, bobKeyPair crypto2.KeyPair, sharedHKA, sharedNHKB [32]byte, cfg *Config) (*HESession, error) {
+	if len(sharedSecret) < 32 {
+		return nil, ErrInvalidInput
+	}
+	if cfg == nil {
+		cfg = &Config{MaxSkip: DefaultMaxSkip}
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
+	if !crypto2.VerifyPublicKey(bobKeyPair.PublicKey) {
+		return nil, ErrInvalidInput
+	}
+
+	rk := append([]byte(nil), sharedSecret[:32]...)
+
+	sk, err := state2.NewStorage(cfg.EffectiveMaxSkip())
+	if err != nil {
+		return nil, err
+	}
+
+	return &HESession{
+		Session: Session{
+			rk:         rk,
+			cks:        nil,
+			recvChains: state2.NewReceiverChains(),
+			dhs:        bobKeyPair.PrivateKey,
+			dhr:        [32]byte{},
+			ns:         0,
+			pn:         0,
+			mkSkipped:  sk,
+			config:     cfg,
+			invariants: state2.NewInvariants(),
+			dhRSet:     false, // Responder has not yet received Initiator's first message
+		},
+		hks:  crypto2.HeaderKey{Key: [32]byte{}, NonceCounter: 0},
+		hkr:  crypto2.HeaderKey{Key: [32]byte{}, NonceCounter: 0},
+		nhks: crypto2.HeaderKey{Key: sharedNHKB, NonceCounter: 0},
+		nhkr: crypto2.HeaderKey{Key: sharedHKA, NonceCounter: 0},
+	}, nil
+}
+
+// SkipMessageKeysHE stores skipped message keys (indexed by hkr.Key) up to pn.
+func (s *HESession) SkipMessageKeysHE(pn uint32) error {
+	chain := s.recvChains.Get(s.dhr)
+	if chain == nil {
+		return nil
+	}
+	if pn > chain.Nr && pn-chain.Nr > s.config.EffectiveMaxSkip() {
+		return ErrMaxSkipExceeded
+	}
+
+	for chain.Nr < pn {
+		msgKey, err := kdf2.DeriveMessageKey(chain.CK)
 		if err != nil {
 			return err
 		}
 
 		var mk [32]byte
 		copy(mk[:], msgKey)
-		if err := s.MKSKIPPED.StoreHK(s.HKr.Key, s.Nr, mk); err != nil {
+		// HE mode indexes skipped keys by header key, not ratchet PK.
+		if err := s.mkSkipped.StoreHK(s.hkr.Key, chain.Nr, mk); err != nil {
 			return err
 		}
 
-		s.CKr, _, err = kdf.ChainKDFDerive(s.CKr)
+		newCKr, _, err := kdf2.ChainKDFDerive(chain.CK)
 		if err != nil {
 			return err
 		}
-		s.Nr++
+		// Zero superseded chain key before replacing (§8.1 secure deletion).
+		zeroBytes(chain.CK)
+		chain.CK = newCKr
+		chain.Nr++
 	}
 	return nil
 }
 
-// DecryptHeader decrypts an encrypted header using HKr or NHKr.
+// DecryptHeader decrypts an encrypted header using hkr or nhkr.
 // Returns (header, dhRatchetFlag, error).
-// dhRatchetFlag is true if decryption succeeded with NHKr.
-func (s *Session) DecryptHeader(encHeader EncryptedHeader, ad []byte) (Header, bool, error) {
-	if pt, ok := crypto.HDECRYPT(s.HKr.Key, encHeader.Ciphertext, ad); ok {
+// DhRatchetFlag is true if decryption succeeded with nhkr (triggers DH ratchet).
+func (s *HESession) DecryptHeader(encHeader EncryptedHeader) (Header, bool, error) {
+	if pt, ok := crypto2.HDECRYPT(s.hkr.Key, encHeader.Ciphertext); ok {
 		header, err := decodeHeader(pt)
 		if err != nil {
 			return Header{}, false, err
@@ -226,7 +203,7 @@ func (s *Session) DecryptHeader(encHeader EncryptedHeader, ad []byte) (Header, b
 		return header, false, nil
 	}
 
-	if pt, ok := crypto.HDECRYPT(s.NHKr.Key, encHeader.Ciphertext, ad); ok {
+	if pt, ok := crypto2.HDECRYPT(s.nhkr.Key, encHeader.Ciphertext); ok {
 		header, err := decodeHeader(pt)
 		if err != nil {
 			return Header{}, false, err
@@ -237,201 +214,271 @@ func (s *Session) DecryptHeader(encHeader EncryptedHeader, ad []byte) (Header, b
 	return Header{}, false, ErrAuthFailure
 }
 
-// EncryptHE encrypts a message with encrypted headers.
-// Returns (EncryptedHeader, Message).
-func (s *Session) EncryptHE(plaintext, ad []byte) (EncryptedHeader, Message, error) {
-	// Check if we need to perform a DH ratchet step after receiving.
-	// DH ratchet is performed when dhRatchetPerformed flag is set (set by receive side).
-	if s.dhRatchetPerformed || s.CKs == nil {
+// EncryptHE encrypts a message with an encrypted header.
+func (s *HESession) EncryptHE(plaintext, ad []byte) (EncryptedHeader, Message, error) {
+	if s.dhRatchetPerformed || s.cks == nil {
 		if err := s.performDHRatchetSendHE(); err != nil {
 			return EncryptedHeader{}, Message{}, err
 		}
 	}
 
-	// Derive message key from CKs.
-	if s.CKs == nil {
+	if s.cks == nil {
 		return EncryptedHeader{}, Message{}, ErrInvalidTransition
 	}
 
-	// Derive message key.
-	msgKey, err := deriveMessageKey(s.CKs)
+	msgKey, err := deriveMessageKey(s.cks)
 	if err != nil {
 		return EncryptedHeader{}, Message{}, err
 	}
 
-	// Build plaintext header.
-	pubKey, err := crypto.PublicKeyFromPrivate(s.DHs)
+	newCKs, err := advanceChainKey(s.cks)
+	if err != nil {
+		return EncryptedHeader{}, Message{}, err
+	}
+
+	// Advance chain state before encryption (spec §3 ordering).
+	zeroBytes(s.cks)
+	s.cks = newCKs
+	n := s.ns
+	s.ns++
+
+	pubKey, err := crypto2.PublicKeyFromPrivate(s.dhs)
 	if err != nil {
 		return EncryptedHeader{}, Message{}, err
 	}
 	header := Header{
 		RatchetPublicKey: pubKey,
-		PN:               s.PN,
-		N:                s.Ns,
+		PN:               s.pn,
+		N:                n,
 	}
 
-	// Encode header for encryption.
-	headerBytes, err := encodeHeader(header)
-	if err != nil {
-		return EncryptedHeader{}, Message{}, err
-	}
+	headerBytes := encodeHeader(header)
 
-	// Encrypt header with HKs.
-	// Header encryption AD is just ad (per spec Section 4.2).
-	encHeaderBytes, err := crypto.HENCRYPT(&s.HKs, headerBytes, ad)
+	encHeaderBytes, err := crypto2.HENCRYPT(&s.hks, headerBytes)
 	if err != nil {
 		return EncryptedHeader{}, Message{}, err
 	}
 	encHeader := EncryptedHeader{Ciphertext: encHeaderBytes}
 
-	// Bind the payload to the encrypted header rather than the plaintext header.
-	ct, err := encryptMessage(msgKey, plaintext, encHeaderBytes, ad)
+	combinedAD := s.buildAD(encHeaderBytes, ad, true)
+	ct, err := suite.Encrypt(msgKey, plaintext, combinedAD, s.config.effectiveEncryptInfo())
 	if err != nil {
 		return EncryptedHeader{}, Message{}, err
 	}
 
-	// Advance chain key.
-	newCKs, err := advanceChainKey(s.CKs)
-	if err != nil {
-		return EncryptedHeader{}, Message{}, err
-	}
-	s.CKs = newCKs
-
-	// Increment message number.
-	s.Ns++
-
-	return encHeader, Message{
-		Ciphertext: ct,
-	}, nil
+	return encHeader, Message{Ciphertext: ct}, nil
 }
 
-// DecryptHE decrypts a message with encrypted headers.
-// Returns plaintext on success, rolls back on auth failure.
-func (s *Session) DecryptHE(encHeader EncryptedHeader, msg Message, ad []byte) ([]byte, error) {
-	// Record state before any changes for rollback.
-	s.invariants.Record(s.Ns, s.Nr, s.PN, s.RK, s.DHs, s.DHr, s.CKs, s.CKr, s.MKSKIPPED)
+// DecryptHE decrypts a message with an encrypted header.
+// Rolls back all state (including header keys) on authentication failure.
+func (s *HESession) DecryptHE(encHeader EncryptedHeader, msg Message, ad []byte) ([]byte, error) {
+	s.invariants.Record(s.ns, s.pn, s.rk, s.dhs, s.dhr, s.cks, s.recvChains, s.mkSkipped, s.dhRSet)
+	hksSnap := s.hks
+	hkrSnap := s.hkr
+	nhksSnap := s.nhks
+	nhkrSnap := s.nhkr
 
-	// Try skipped keys first by iterating through MKSKIPPED.
-	// Per Section 4.6: try HDECRYPT with each stored hk, checking if header.n matches.
-	// Header AD is CONCAT(ad, enc_header) per spec.
-	if msgKey, found := s.trySkippedMessageKeysHE(encHeader.Ciphertext, ad); found {
-		pt, err := decryptMessage(msgKey, msg.Ciphertext, encHeader.Ciphertext, ad)
+	rollbackAll := func() {
+		s.rollback()
+		s.hks = hksSnap
+		s.hkr = hkrSnap
+		s.nhks = nhksSnap
+		s.nhkr = nhkrSnap
+	}
+
+	if msgKey, found := s.trySkippedMessageKeysHE(encHeader.Ciphertext); found {
+		combinedAD := s.buildAD(encHeader.Ciphertext, ad, false)
+		pt, err := suite.Decrypt(msgKey, msg.Ciphertext, combinedAD, s.config.effectiveEncryptInfo())
 		if err != nil {
-			s.rollback()
+			rollbackAll()
 			return nil, ErrAuthFailure
 		}
 		return pt, nil
 	}
 
-	// Decrypt header to detect DH ratchet requirement.
-	// AD is CONCAT(ad, enc_header) per Section 4.6 spec.
-	header, dhRatchet, err := s.DecryptHeader(encHeader, ad)
+	header, dhRatchet, err := s.DecryptHeader(encHeader)
 	if err != nil {
-		s.rollback()
+		rollbackAll()
 		return nil, err
 	}
 
-	// Check if this is a new remote ratchet key (DH ratchet).
-	newRemotePK := !s.hasRemoteRatchetKey() || !hkBytesEqual(s.DHr[:], header.RatchetPublicKey[:])
+	newRemotePK := !s.hasRemoteRatchetKey() || !hkBytesEqual(s.dhr[:], header.RatchetPublicKey[:])
 
 	if newRemotePK || dhRatchet {
-		// Perform DH ratchet step.
+		// Strict rejection: if DHr changed but header decrypted with current hkr
+		// (not nhkr), the message is anomalous — spec §4 always couples DH ratchet
+		// with header key rotation. Only allow this path before DHr has ever been set
+		// (Bob's first received message where hkr is still zeroed and nhkr succeeds).
+		if newRemotePK && !dhRatchet && s.hasRemoteRatchetKey() {
+			rollbackAll()
+			return nil, ErrInvalidTransition
+		}
+
 		if err := s.performDHRatchetRecvHE(header, dhRatchet); err != nil {
-			s.rollback()
+			rollbackAll()
 			return nil, err
 		}
 	}
 
-	// Check MaxSkip before deriving keys.
-	if header.N > s.Nr && header.N-s.Nr > s.Config.EffectiveMaxSkip() {
-		s.rollback()
+	// Look up the active receive chain (s.dhr updated by performDHRatchetRecvHE if called).
+	chain := s.recvChains.Get(s.dhr)
+	if chain == nil {
+		rollbackAll()
+		return nil, ErrInvalidTransition
+	}
+
+	if header.N > chain.Nr && header.N-chain.Nr > s.config.EffectiveMaxSkip() {
+		rollbackAll()
 		return nil, ErrMaxSkipExceeded
 	}
 
 	if err := s.SkipMessageKeysHE(header.N); err != nil {
-		s.rollback()
+		rollbackAll()
 		return nil, err
 	}
 
-	// Derive message key from receiving chain key using decrypted header's N.
-	msgKey, err := s.deriveRecvMessageKey(header.N)
+	msgKey, err := s.deriveRecvMessageKey(s.dhr, chain, header.N)
 	if err != nil {
-		s.rollback()
+		rollbackAll()
 		return nil, err
 	}
 
-	pt, err := decryptMessage(msgKey, msg.Ciphertext, encHeader.Ciphertext, ad)
+	combinedAD2 := s.buildAD(encHeader.Ciphertext, ad, false)
+	pt, err := suite.Decrypt(msgKey, msg.Ciphertext, combinedAD2, s.config.effectiveEncryptInfo())
 	if err != nil {
-		s.rollback()
+		rollbackAll()
 		return nil, ErrAuthFailure
 	}
 
-	// Decryption successful - commit state changes.
-	s.Nr++
-
+	chain.Nr++
 	return pt, nil
 }
 
 // performDHRatchetRecvHE performs the receive-side DH ratchet step for header encryption.
-func (s *Session) performDHRatchetRecvHE(header Header, promoteNextHeaderKey bool) error {
-	// Save current receiving chain key and chain length for skipped message derivation.
-	prevCKr := s.CKr
-	prevNr := s.Nr
-	prevHKr := s.HKr
+func (s *HESession) performDHRatchetRecvHE(header Header, promoteNextHeaderKey bool) error {
+	// Validate incoming ratchet public key before use.
+	if !crypto2.VerifyPublicKey(header.RatchetPublicKey) {
+		return ErrInvalidInput
+	}
+
+	// Look up old chain for PN-skip loop.
+	var prevCKr []byte
+	prevNr := uint32(0)
+	prevHKr := s.hkr
+	if s.dhRSet {
+		if oldChain := s.recvChains.Get(s.dhr); oldChain != nil {
+			prevCKr = append([]byte(nil), oldChain.CK...)
+			prevNr = oldChain.Nr
+		}
+	}
 
 	if promoteNextHeaderKey {
-		s.HKr = s.NHKr
+		s.hkr = s.nhkr
 	}
 
-	// Compute DH output: DH(DHs.Private, newRemotePK).
-	dhOut, err := crypto.SharedSecret(s.DHs, header.RatchetPublicKey)
+	dhOut, err := crypto2.SharedSecret(s.dhs, header.RatchetPublicKey)
 	if err != nil {
+		zeroBytes(prevCKr)
 		return err
 	}
 
-	// Derive new root key, receiving chain key, and next header key.
-	newRK, ckr, nhkr, err := kdf.KDF_RK_HE(s.RK, dhOut)
+	newRK, ckr, nhkr, err := kdf2.RRKHE(s.rk, dhOut, s.config.effectiveHEKDFInfo())
 	if err != nil {
+		zeroBytes(prevCKr)
 		return err
 	}
-	s.RK = newRK
-	s.CKr = ckr
-	s.NHKr = crypto.HeaderKey{Key: nhkr}
 
-	// Update remote ratchet public key.
-	s.DHr = header.RatchetPublicKey
+	// Zero superseded root key before replacing (§8.1 secure deletion).
+	zeroBytes(s.rk)
+	s.rk = newRK
+	s.nhkr = crypto2.HeaderKey{Key: nhkr}
 
-	// Derive skipped message keys for any missed messages from previous chain.
-	// The missed messages are from prevNr to (header.PN - 1) if header.PN > prevNr.
-	// Must derive from previous CKr (before ratchet), not the new CKr.
-	// Skip keys are indexed by HKr.Key (which will become NHKr after rotation).
+	// Store skipped keys from the previous chain.
 	if header.PN > prevNr && prevCKr != nil {
-		ckr := make([]byte, len(prevCKr))
-		copy(ckr, prevCKr)
+		if header.PN-prevNr > s.config.EffectiveMaxSkip() {
+			zeroBytes(prevCKr)
+			zeroBytes(ckr)
+			return ErrMaxSkipExceeded
+		}
+		ckrTmp := append([]byte(nil), prevCKr...)
 		for n := prevNr; n < header.PN; n++ {
-			msgKey, err := kdf.DeriveMessageKey(ckr)
+			msgKey, err := kdf2.DeriveMessageKey(ckrTmp)
 			if err != nil {
+				zeroBytes(ckrTmp)
+				zeroBytes(prevCKr)
+				zeroBytes(ckr)
 				return err
 			}
 			var mk [32]byte
 			copy(mk[:], msgKey)
-			// Previous-chain skipped keys must remain indexed by the header key
-			// that actually encrypted that chain's headers.
-			if err := s.MKSKIPPED.StoreHK(prevHKr.Key, n, mk); err != nil {
+			if err := s.mkSkipped.StoreHK(prevHKr.Key, n, mk); err != nil {
+				zeroBytes(ckrTmp)
+				zeroBytes(prevCKr)
+				zeroBytes(ckr)
 				return err
 			}
-			ckr, _, err = kdf.ChainKDFDerive(ckr)
+			newCkrTmp, _, err := kdf2.ChainKDFDerive(ckrTmp)
 			if err != nil {
+				zeroBytes(ckrTmp)
+				zeroBytes(prevCKr)
+				zeroBytes(ckr)
 				return err
 			}
+			zeroBytes(ckrTmp)
+			ckrTmp = newCkrTmp
 		}
+		zeroBytes(ckrTmp)
+	}
+	zeroBytes(prevCKr)
+
+	// Push new receive chain (may evict oldest if at capacity).
+	s.recvChains.Push(header.RatchetPublicKey, ckr)
+	zeroBytes(ckr)
+
+	s.dhr = header.RatchetPublicKey
+	s.dhRSet = true
+	zeroBytes(s.cks)
+	s.cks = nil
+	s.dhRatchetPerformed = true // consistent with base DR flag convention
+
+	return nil
+}
+
+// performDHRatchetSendHE performs the sending-side DH ratchet step for header encryption.
+func (s *HESession) performDHRatchetSendHE() error {
+	if !s.hasRemoteRatchetKey() {
+		return ErrSessionNotInitialized
 	}
 
-	// Reset receiving chain counter.
-	s.Nr = 0
-	s.CKs = nil
+	s.pn = s.ns
+	s.ns = 0
+	s.hks = s.nhks
 
-	// The next send ratchet is driven by the missing sending chain state.
+	newPriv, _, err := crypto2.GenerateKeyPair()
+	if err != nil {
+		return err
+	}
+
+	dhOut, err := crypto2.SharedSecret(newPriv, s.dhr)
+	if err != nil {
+		return err
+	}
+
+	newRK, cks, nhks, err := kdf2.RRKHE(s.rk, dhOut, s.config.effectiveHEKDFInfo())
+	if err != nil {
+		return err
+	}
+
+	// Zero superseded key material before replacing (§8.1 secure deletion).
+	zeroBytes(s.rk)
+	s.rk = newRK
+	zeroBytes(s.cks)
+	s.cks = cks
+	s.nhks = crypto2.HeaderKey{Key: nhks}
+	for i := range s.dhs {
+		s.dhs[i] = 0
+	}
+	s.dhs = newPriv
 	s.dhRatchetPerformed = false
 
 	return nil
@@ -457,47 +504,6 @@ func hkBytesEqual(a, b []byte) bool {
 	return subtle.ConstantTimeCompare(a, b) == 1
 }
 
-// trySkippedMessageKeysHE iterates through MKSKIPPED and tries to decrypt
-// the encrypted header with each stored header key. Per Section 4.6 spec.
-func (s *Session) trySkippedMessageKeysHE(encHeader []byte, headerAD []byte) ([]byte, bool) {
-	return s.MKSKIPPED.TryAllHeaderKeys(encHeader, headerAD, crypto.HDECRYPT)
-}
-
-// performDHRatchetSendHE performs the DH ratchet step for the sending side
-// after a DH ratchet was performed on the receiving side.
-func (s *Session) performDHRatchetSendHE() error {
-	// Save PN = Ns, reset Ns.
-	s.PN = s.Ns
-	s.Ns = 0
-
-	// Promote the pending sending header key before sending the first message of
-	// the new local sending chain.
-	s.HKs = s.NHKs
-
-	// Generate the new local ratchet key for this sending chain.
-	newPriv, _, err := crypto.GenerateKeyPair()
-	if err != nil {
-		return err
-	}
-
-	// The receive side already advanced RK/CKr; sending only needs the second
-	// DH step using the fresh local ratchet key and the current remote key.
-	dhOut, err := crypto.SharedSecret(newPriv, s.DHr)
-	if err != nil {
-		return err
-	}
-
-	newRK, cks, nhks, err := kdf.KDF_RK_HE(s.RK, dhOut)
-	if err != nil {
-		return err
-	}
-	s.RK = newRK
-	s.CKs = cks
-	s.NHKs = crypto.HeaderKey{Key: nhks}
-	s.DHs = newPriv
-
-	// Clear DH ratchet performed flag.
-	s.dhRatchetPerformed = false
-
-	return nil
+func (s *HESession) trySkippedMessageKeysHE(encHeader []byte) ([]byte, bool) {
+	return s.mkSkipped.TryAllHeaderKeys(encHeader, crypto2.HDECRYPT)
 }
