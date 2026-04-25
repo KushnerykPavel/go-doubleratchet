@@ -12,6 +12,8 @@ Go implementation of the Signal Double Ratchet protocol family:
 - Sparse Post-Quantum Ratchet / SPQR (section 5)
 - Triple Ratchet / hybrid EC+PQ (section 6)
 
+> **Unofficial implementation.** This library implements the [Signal Double Ratchet specification](https://signal.org/docs/specifications/doubleratchet/) independently. It is not affiliated with, endorsed by, or wire-compatible with Signal Messenger or the official [libsignal](https://github.com/signalapp/libsignal) library.
+
 > **Status:** Pre-1.0. The API may change between minor versions until a v1.0.0 tag is cut. Pin your dependency to a specific version.
 
 ## Table of Contents
