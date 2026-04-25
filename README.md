@@ -8,6 +8,7 @@
 Go implementation of the Signal protocol family:
 
 - **X3DH** key agreement (Extended Triple Diffie-Hellman)
+- **PQXDH** key agreement (Post-Quantum Extended Diffie-Hellman)
 - Base Double Ratchet (Signal spec section 3)
 - Double Ratchet with header encryption (section 4)
 - Sparse Post-Quantum Ratchet / SPQR (section 5)
@@ -22,6 +23,7 @@ Go implementation of the Signal protocol family:
 - [Install](#install)
 - [Which Mode Should I Use?](#which-mode-should-i-use)
 - [X3DH Key Agreement](#x3dh-key-agreement)
+- [PQXDH Key Agreement](#pqxdh-key-agreement)
 - [Base Double Ratchet](#base-double-ratchet)
 - [Header Encryption](#header-encryption)
 - [Sparse Post-Quantum Ratchet](#sparse-post-quantum-ratchet)
@@ -57,7 +59,7 @@ Requires Go 1.25.0 or later (see `go.mod`).
 | SPQR | `*doubleratchet.SPQRSession` | You need post-quantum ratcheting without per-message PQ key exchange. | Requires a production `scka.Provider`. |
 | Triple Ratchet | `*doubleratchet.TripleRatchetSession` | You want hybrid classical and post-quantum security. | Carries both EC and SCKA header data. |
 
-All modes take an initial 32-byte shared secret. Use the `x3dh` sub-package (included) to derive that secret via the Signal X3DH handshake, or supply one from your own handshake.
+All modes take an initial 32-byte shared secret. Use the `x3dh` or `pqxdh` sub-packages to derive that secret via the Signal X3DH/PQXDH handshake, or supply one from your own handshake.
 
 ## X3DH Key Agreement
 
@@ -123,6 +125,77 @@ plaintext, _ := bobSess.Decrypt(msg, ad)
 | `x3dh.ErrZeroSharedSecret` | A DH computation returned all zeros; low-order point attack. |
 
 X3DH output `AD` (`IKA_pub ‖ IKB_pub`) should be passed as the `ad` argument to every `Encrypt`/`Decrypt` call for transcript binding.
+
+## PQXDH Key Agreement
+
+The `pqxdh` sub-package implements the [Signal PQXDH specification](https://signal.org/docs/specifications/pqxdh/) — an extension of X3DH that adds ML-KEM (FIPS 203) post-quantum key encapsulation to the handshake. This protects against "harvest now, decrypt later" quantum attacks while retaining classical X25519 security.
+
+PQXDH produces a 96-byte output split into three 32-byte keys: root key, chain key, and PQR key — feeding the Double Ratchet and SPQR ratchets directly.
+
+```go
+import (
+    "github.com/KushnerykPavel/go-doubleratchet/pqxdh"
+)
+
+// --- Bob: generate and publish a prekey bundle ---
+
+bobIK, _    := pqxdh.GenerateIdentityKey()
+bobSPK, _   := pqxdh.GenerateSPK(bobIK, 1)
+bobOPK, _   := pqxdh.GenerateOPK(1)
+bobPQSPK, _ := pqxdh.GenerateKEMSPK(bobIK, 1, pqxdh.MLKEM1024)
+
+bundle := &pqxdh.PrekeyBundle{
+    IdentityKey:       bobIK.PublicKey,
+    SignedPreKey:      bobSPK.PublicKey,
+    SPKID:            bobSPK.KeyID,
+    SPKSignature:     bobSPK.Signature,
+    OneTimePreKey:    &bobOPK.PublicKey,
+    OPKID:            &bobOPK.KeyID,
+    PQPreKey:         bobPQSPK.EncapsulationKey,
+    PQPreKeyID:       bobPQSPK.KeyID,
+    PQPreKeySignature: bobPQSPK.Signature,
+    PQParams:         pqxdh.MLKEM1024,
+}
+
+// --- Alice: fetch bundle, run handshake ---
+
+aliceIK, _ := pqxdh.GenerateIdentityKey()
+aliceResult, initMsg, _ := pqxdh.SendHandshake(aliceIK, bundle)
+
+// --- Bob: receive and complete handshake ---
+
+bobResult, _ := pqxdh.ReceiveHandshake(bobIK, &bobSPK, &bobOPK, bobPQSPK.DecapsKey(), &initMsg)
+// bobResult.RootKey  == aliceResult.RootKey
+// bobResult.ChainKey == aliceResult.ChainKey
+// bobResult.PQRKey   == aliceResult.PQRKey
+```
+
+**ML-KEM parameter sets:**
+
+| Constant | NIST level | Notes |
+|---|---|---|
+| `pqxdh.MLKEM768` | Level 3 | Smaller keys and ciphertexts |
+| `pqxdh.MLKEM1024` | Level 5 | Default, matches libsignal's Kyber-1024 |
+
+**Key types:**
+
+| Type | Role | Lifetime |
+|---|---|---|
+| `IdentityKey` | Long-term authentication anchor | Persistent |
+| `SignedPreKey` | Semi-static DH contributor, XEdDSA-signed | Rotate periodically |
+| `OneTimePreKey` | Single-use forward-secrecy boost | Discard after one use |
+| `KEMSignedPreKey` | Signed last-resort KEM prekey (PQSPK) | Rotate periodically |
+| `KEMOneTimePreKey` | Single-use signed KEM prekey (PQOPK) | Discard after one use |
+
+**Errors:**
+
+| Error | Meaning |
+|---|---|
+| `pqxdh.ErrInvalidSPKSignature` | SPK signature verification failed. |
+| `pqxdh.ErrInvalidPQPreKeySignature` | PQ prekey signature verification failed. |
+| `pqxdh.ErrZeroSharedSecret` | A DH computation returned all zeros; low-order point attack. |
+| `pqxdh.ErrInvalidPublicKey` | Received public key fails canonical validation. |
+| `pqxdh.ErrUnsupportedKEMParams` | Unknown ML-KEM parameter set. |
 
 ## Base Double Ratchet
 
@@ -464,6 +537,7 @@ The root package re-exports everything most applications need. These sub-package
 | Package | Import path | Purpose |
 |---|---|---|
 | `x3dh` | `go-doubleratchet/x3dh` | X3DH key agreement: key generation, XEdDSA signatures, `SendHandshake`/`ReceiveHandshake`. |
+| `pqxdh` | `go-doubleratchet/pqxdh` | PQXDH key agreement: X3DH + ML-KEM post-quantum KEM, 96-byte output (root key + chain key + PQR key). |
 | `crypto` | `go-doubleratchet/crypto` | X25519 key generation, DH shared secret, header encryption primitives (`HENCRYPT`/`HDECRYPT`). |
 | `kdf` | `go-doubleratchet/kdf` | Chain KDF, root KDF, HE root KDF, SPQR KDF functions. |
 | `scka` | `go-doubleratchet/scka` | `Provider` interface for post-quantum SCKA implementations. |
