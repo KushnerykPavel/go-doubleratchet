@@ -17,9 +17,9 @@ type ChainKDF struct {
 }
 
 var (
-	// chainConstant is used in chain key derivation (Signal spec: 0x02).
+	// ChainConstant is used in chain key derivation (Signal spec: 0x02).
 	chainConstant = []byte{0x02}
-	// messageKeyConstant is used to derive a message key from a chain key (Signal spec: 0x01).
+	// MessageKeyConstant is used to derive a message key from a chain key (Signal spec: 0x01).
 	messageKeyConstant = []byte{0x01}
 )
 

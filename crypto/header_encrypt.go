@@ -27,7 +27,7 @@ const (
 )
 
 var (
-	// headerKeyInfo is the HKDF info constant for header key derivation.
+	// HeaderKeyInfo is the HKDF info constant for header key derivation.
 	headerKeyInfo = []byte("DoubleRatchetHeaderKey")
 )
 
@@ -43,8 +43,8 @@ var ErrInvalidNonceCounter = errors.New("invalid nonce counter")
 // HENCRYPT encrypts a header using AES-256-CBC + HMAC-SHA256.
 //
 // Per spec §4.2: HENCRYPT(hk, plaintext) — no associated data parameter.
-// hk is the header key with a stateful nonce counter.
-// header is the plaintext header bytes.
+// Hk is the header key with a stateful nonce counter.
+// Header is the plaintext header bytes.
 // Returns encrypted header: nonce (16 bytes) || AES-CBC ciphertext || HMAC tag (32 bytes).
 // Increments hk.NonceCounter after use.
 func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
@@ -88,8 +88,8 @@ func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
 // HDECRYPT decrypts an encrypted header.
 //
 // Per spec §4.2: HDECRYPT(hk, ciphertext) — no associated data parameter.
-// hk is the 32-byte header key.
-// ciphertext is the encrypted header from HENCRYPT.
+// Hk is the 32-byte header key.
+// Ciphertext is the encrypted header from HENCRYPT.
 // Returns (plaintext, true) on success, (nil, false) on failure or zeroed key.
 func HDECRYPT(hk [32]byte, ciphertext []byte) ([]byte, bool) {
 	if isZeroed(hk[:]) {

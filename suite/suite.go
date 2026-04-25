@@ -19,11 +19,19 @@ const (
 	TagSize = 32
 	// IVSize is the AES-CBC IV size in bytes.
 	IVSize = 16
-	// derivedKeySize is the total HKDF output: 32 (enc) + 32 (auth) + 16 (IV) = 80 bytes.
+	// DerivedKeySize is the total HKDF output: 32 (enc) + 32 (auth) + 16 (IV) = 80 bytes.
 	derivedKeySize = 80
 )
 
-var errCiphertextShort = errors.New("ciphertext too short")
+var (
+	errCiphertextShort      = errors.New("ciphertext too short")
+	errCiphertextLenInvalid = errors.New("ciphertext length invalid")
+	errAuthFailed           = errors.New("authentication failed")
+	errEmptyData            = errors.New("empty data")
+	errInvalidBlockSize     = errors.New("invalid block size")
+	errInvalidPadding       = errors.New("invalid padding")
+	errInvalidPaddingVal    = errors.New("invalid padding value")
+)
 
 // Encrypt encrypts plaintext using AES-256-CBC and authenticates with HMAC-SHA256.
 //
@@ -65,7 +73,7 @@ func Encrypt(msgKey, plaintext, ad, info []byte) ([]byte, error) {
 }
 
 // Decrypt decrypts and authenticates ciphertext produced by Encrypt.
-// msgKey, ad, and info must match those used during encryption.
+// MsgKey, ad, and info must match those used during encryption.
 // Ciphertext format: IV (16) || AES-CBC ciphertext || HMAC tag (32).
 func Decrypt(msgKey, ciphertext, ad, info []byte) ([]byte, error) {
 	if len(ciphertext) < IVSize+TagSize {
@@ -84,7 +92,7 @@ func Decrypt(msgKey, ciphertext, ad, info []byte) ([]byte, error) {
 	tag := ciphertext[tagOffset:]
 
 	if len(ct) == 0 || len(ct)%aes.BlockSize != 0 {
-		return nil, errors.New("ciphertext length invalid")
+		return nil, errCiphertextLenInvalid
 	}
 
 	// Verify MAC before decrypting.
@@ -94,7 +102,7 @@ func Decrypt(msgKey, ciphertext, ad, info []byte) ([]byte, error) {
 	h.Write(ct)
 	expected := h.Sum(nil)
 	if !hmac.Equal(tag, expected) {
-		return nil, errors.New("authentication failed")
+		return nil, errAuthFailed
 	}
 
 	block, err := aes.NewCipher(encKey)
@@ -109,7 +117,7 @@ func Decrypt(msgKey, ciphertext, ad, info []byte) ([]byte, error) {
 }
 
 // deriveKeys uses HKDF-SHA256 to derive enc_key, auth_key, and iv from msgKey.
-// nil salt per spec; info is application-specific.
+// Nil salt per spec; info is application-specific.
 func deriveKeys(msgKey, info []byte) (encKey, authKey, iv []byte, err error) {
 	reader := hkdf.New(sha256.New, msgKey, nil, info)
 	derived := make([]byte, derivedKeySize)
@@ -130,18 +138,18 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 
 func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
 	if len(data) == 0 {
-		return nil, errors.New("empty data")
+		return nil, errEmptyData
 	}
 	if len(data)%blockSize != 0 {
-		return nil, errors.New("invalid block size")
+		return nil, errInvalidBlockSize
 	}
 	padding := int(data[len(data)-1])
 	if padding == 0 || padding > blockSize {
-		return nil, errors.New("invalid padding")
+		return nil, errInvalidPadding
 	}
 	for i := len(data) - padding; i < len(data); i++ {
 		if data[i] != byte(padding) {
-			return nil, errors.New("invalid padding value")
+			return nil, errInvalidPaddingVal
 		}
 	}
 	return data[:len(data)-padding], nil

@@ -142,7 +142,7 @@ func (s *Storage) StoreHK(headerKey [32]byte, messageNumber uint32, messageKey [
 	// If key already exists, don't store (shouldn't happen in practice).
 	if _, exists := s.entries[storageKey]; !exists {
 		// Evict oldest if at capacity.
-		if uint32(len(s.entries)) >= s.maxSkip { //nolint:gosec // len cannot exceed uint32 max in practice
+		if uint32(len(s.entries)) >= s.maxSkip {
 			evictKey := s.order[0]
 			delete(s.entries, evictKey)
 			s.order = s.order[1:]

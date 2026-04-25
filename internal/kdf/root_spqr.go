@@ -56,9 +56,9 @@ func SCKARatchetCK(ck []byte, ctr uint32) (nextCK, mk []byte, err error) {
 	info := make([]byte, len(messageKeysInfo)+4)
 	copy(info, messageKeysInfo)
 	info[len(messageKeysInfo)] = byte(ctr >> 24)
-	info[len(messageKeysInfo)+1] = byte(ctr >> 16) //nolint:gosec // uint32 shift fits in byte
-	info[len(messageKeysInfo)+2] = byte(ctr >> 8)  //nolint:gosec // uint32 shift fits in byte
-	info[len(messageKeysInfo)+3] = byte(ctr)       //nolint:gosec // uint32 low byte fits in byte
+	info[len(messageKeysInfo)+1] = byte(ctr >> 16)
+	info[len(messageKeysInfo)+2] = byte(ctr >> 8)
+	info[len(messageKeysInfo)+3] = byte(ctr)
 
 	okm, err := hkdfExpand(make([]byte, 32), ck, info, 64)
 	if err != nil {

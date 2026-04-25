@@ -459,14 +459,14 @@ func encodeSCKAHeader(h *SCKAHeader) ([]byte, error) {
 	msgLen := len(h.Msg)
 	size := 4 + msgLen + 4
 	buf := make([]byte, size)
-	buf[0] = byte(msgLen >> 24) //nolint:gosec // msgLen bounded by slice allocation
-	buf[1] = byte(msgLen >> 16) //nolint:gosec // msgLen bounded by slice allocation
-	buf[2] = byte(msgLen >> 8)  //nolint:gosec // msgLen bounded by slice allocation
-	buf[3] = byte(msgLen)       //nolint:gosec // msgLen bounded by slice allocation
+	buf[0] = byte(msgLen >> 24)
+	buf[1] = byte(msgLen >> 16)
+	buf[2] = byte(msgLen >> 8)
+	buf[3] = byte(msgLen)
 	copy(buf[4:], h.Msg)
 	buf[size-4] = byte(h.N >> 24)
-	buf[size-3] = byte(h.N >> 16) //nolint:gosec // uint32 shift always fits in byte
-	buf[size-2] = byte(h.N >> 8)  //nolint:gosec // uint32 shift always fits in byte
-	buf[size-1] = byte(h.N)       //nolint:gosec // uint32 low byte always fits in byte
+	buf[size-3] = byte(h.N >> 16)
+	buf[size-2] = byte(h.N >> 8)
+	buf[size-1] = byte(h.N)
 	return buf, nil
 }

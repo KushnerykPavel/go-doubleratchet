@@ -8,41 +8,26 @@ import (
 
 // MockSCKA is a mock implementation of SCKAProvider for testing.
 type MockSCKA struct {
-	// SharedKey is the shared secret.
-	SharedKey []byte
-
-	// SendCount tracks number of Send() calls.
-	SendCount int
-
-	// ReceiveCount tracks number of Receive() calls.
-	ReceiveCount int
-
-	// SendEpoch is the epoch sent in each Send().
-	SendEpoch uint32
-
-	// KeyEpoch is the epoch for new key material.
-	KeyEpoch uint32
-
-	// OutputKey is the key material produced (nil to simulate no new key).
-	OutputKey []byte
-
-	// InitializedAs tracks initialization: "alice", "bob", or "".
 	InitializedAs string
-
-	// SkipBeforeKey if set, Send() returns nil outputKey for first N calls.
+	SharedKey     []byte
+	OutputKey     []byte
+	SendCount     int
+	ReceiveCount  int
 	SkipBeforeKey int
+	SendEpoch     uint32
+	KeyEpoch      uint32
 }
 
 // mockSCKASnapshot holds a deep copy of MockSCKA state for rollback.
 type mockSCKASnapshot struct {
+	initializedAs string
 	sharedKey     []byte
+	outputKey     []byte
 	sendCount     int
 	receiveCount  int
+	skipBeforeKey int
 	sendEpoch     uint32
 	keyEpoch      uint32
-	outputKey     []byte
-	initializedAs string
-	skipBeforeKey int
 }
 
 // InitAlice initializes the mock SCKA for Alice.
@@ -126,7 +111,7 @@ func (m *MockSCKA) Receive(msg []byte) (receivingEpoch uint32, outputKey []byte,
 }
 
 // Snapshot captures the current MockSCKA state for rollback.
-func (m *MockSCKA) Snapshot() interface{} {
+func (m *MockSCKA) Snapshot() any {
 	snap := &mockSCKASnapshot{
 		sendCount:     m.SendCount,
 		receiveCount:  m.ReceiveCount,
@@ -145,8 +130,11 @@ func (m *MockSCKA) Snapshot() interface{} {
 }
 
 // Restore reverts MockSCKA state to a previously captured snapshot.
-func (m *MockSCKA) Restore(snapshot interface{}) {
-	snap := snapshot.(*mockSCKASnapshot)
+func (m *MockSCKA) Restore(snapshot any) {
+	snap, ok := snapshot.(*mockSCKASnapshot)
+	if !ok {
+		return
+	}
 	m.SharedKey = snap.sharedKey
 	m.SendCount = snap.sendCount
 	m.ReceiveCount = snap.receiveCount

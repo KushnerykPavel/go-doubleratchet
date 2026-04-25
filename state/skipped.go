@@ -22,10 +22,10 @@ type SkippedKeyEntry struct {
 
 // Storage implements bounded skipped-key storage.
 type Storage struct {
-	maxSkip uint32
 	entries map[string]*SkippedKeyEntry
-	order   []string // insertion order for eviction
+	order   []string
 	mu      sync.Mutex
+	maxSkip uint32
 }
 
 // Lock acquires the storage mutex.

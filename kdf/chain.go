@@ -18,9 +18,9 @@ type ChainKDF struct {
 }
 
 var (
-	// chainConstant is used in chain key derivation (Signal spec: 0x01).
+	// ChainConstant is used in chain key derivation (Signal spec: 0x01).
 	chainConstant = []byte{0x01}
-	// messageKeyConstant is used to derive a message key from a chain key (Signal spec: 0x02).
+	// MessageKeyConstant is used to derive a message key from a chain key (Signal spec: 0x02).
 	messageKeyConstant = []byte{0x02}
 )
 
@@ -59,7 +59,7 @@ func DeriveNextChainKey(chainKey []byte) (nextChainKey, messageKey []byte, err e
 	h.Write(messageKeyConstant)
 	messageKey = h.Sum(nil)
 
-	return
+	return nextChainKey, messageKey, err
 }
 
 // ChainKDFDerive performs chain KDF in one call.

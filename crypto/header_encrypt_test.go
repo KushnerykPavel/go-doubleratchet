@@ -39,7 +39,7 @@ func TestHeaderNonceMonotonicity(t *testing.T) {
 	header[0] = 0xA1
 
 	ciphertexts := make([][]byte, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		ct, err := HENCRYPT(&hk, header)
 		require.NoError(t, err)
 		ciphertexts[i] = ct
@@ -51,7 +51,7 @@ func TestHeaderNonceMonotonicity(t *testing.T) {
 	}
 
 	// All ciphertexts must decrypt correctly.
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		pt, ok := HDECRYPT(hk.Key, ciphertexts[i])
 		require.True(t, ok, "HDECRYPT failed at iteration %d", i)
 		require.Equal(t, header, pt)

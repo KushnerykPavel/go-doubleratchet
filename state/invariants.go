@@ -11,15 +11,15 @@ var ErrInvariantViolation = errors.New("invariant violation")
 
 // Invariants tracks previous session state for rollback on authentication failure.
 type Invariants struct {
+	prevMKSKIPPED *Storage
+	prevRK        []byte
+	prevCKs       []byte
+	prevCKr       []byte
 	prevNs        uint32
 	prevNr        uint32
 	prevPN        uint32
-	prevRK        []byte
 	prevDHs       [32]byte
 	prevDHr       [32]byte
-	prevCKs       []byte
-	prevCKr       []byte
-	prevMKSKIPPED *Storage
 	prevDhRSet    bool
 }
 
@@ -45,15 +45,15 @@ func (inv *Invariants) Record(ns, nr, pn uint32, rk []byte, dhs, dhr [32]byte, c
 
 // PrevState holds the previous state values for rollback.
 type PrevState struct {
+	MKSKIPPED *Storage
+	RK        []byte
+	CKs       []byte
+	CKr       []byte
 	Ns        uint32
 	Nr        uint32
 	PN        uint32
-	RK        []byte
 	DHs       [32]byte
 	DHr       [32]byte
-	CKs       []byte
-	CKr       []byte
-	MKSKIPPED *Storage
 	DhRSet    bool
 }
 

@@ -22,7 +22,8 @@ type KeyPair struct {
 	PublicKey  [KeySize]byte
 }
 
-var errInvalidKey = errors.New("invalid key")
+// ErrLowOrderPoint is returned when the X25519 shared secret is all zeros.
+var ErrLowOrderPoint = errors.New("x25519: shared secret is all zeros; peer sent a low-order point")
 
 // GenerateKeyPair generates a new X25519 key pair.
 // Returns private key (32 bytes) and public key (32 bytes).
@@ -44,7 +45,7 @@ func GenerateKeyPair() (privateKey, publicKey [KeySize]byte, err error) {
 
 	copy(privateKey[:], privBytes)
 	copy(publicKey[:], pubBytes)
-	return
+	return privateKey, publicKey, err
 }
 
 // NewKeyPair generates a new X25519 KeyPair.
@@ -74,7 +75,7 @@ func SharedSecret(privateKey, publicKey [KeySize]byte) ([]byte, error) {
 		}
 	}
 	if allZero {
-		return nil, errors.New("x25519: shared secret is all zeros; peer sent a low-order point")
+		return nil, ErrLowOrderPoint
 	}
 	return ss, nil
 }

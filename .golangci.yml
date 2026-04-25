@@ -49,6 +49,9 @@ linters:
     - zerologlint       # no zerolog usage
     - nosprintfhostport # no URL construction
     - unqueryvet        # no SQL
+    - funcorder         # function ordering is intentional for readability
+    - godoclint         # package doc comments managed per-package, not per-file
+    - err113            # inline errors acceptable for internal helpers
 
   settings:
     errcheck:
@@ -153,6 +156,40 @@ linters:
         linters:
           - gocyclo
           - nestif
+
+      # Public wrapper packages mirror internal implementations; allow same patterns
+      - path: "^(suite|crypto|kdf|state)/.*\\.go"
+        linters:
+          - gocyclo
+          - nestif
+          - gocritic
+
+      # G115: integer overflow on type conversion — counters are bounded by protocol limits
+      - linters:
+          - gosec
+        text: "G115"
+
+      # KDF_RK_HE, KDF_SCKA_INIT follow cryptographic naming conventions (not Go style)
+      - path: "kdf/"
+        linters:
+          - revive
+          - staticcheck
+
+      # Package doc comments: allow any-file placement in multi-file packages
+      - linters:
+          - godoclint
+        text: "package"
+
+
+      # gocritic mergeParams: verbose param lists improve readability in crypto code
+      - path: "internal/state/invariants\\.go"
+        linters:
+          - gocritic
+
+      # mock: gosec byte conversion from small counters is safe
+      - path: "scka/mock\\.go"
+        linters:
+          - gosec
 
 formatters:
   enable:

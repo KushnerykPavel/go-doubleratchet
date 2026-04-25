@@ -1,0 +1,37 @@
+version: "3"
+
+tasks:
+  lint:
+    desc: Run golangci-lint with .golangci.yml config (mirrors CI lint job)
+    cmds:
+      - golangci-lint run --config .golangci.yml ./...
+
+  vuln:
+    desc: Run govulncheck (mirrors CI vulnerability scan job)
+    cmds:
+      - go install golang.org/x/vuln/cmd/govulncheck@latest
+      - govulncheck ./...
+
+  test:
+    desc: Run tests with race detector (mirrors CI test job)
+    cmds:
+      - go test -race -count=1 ./...
+
+  vet:
+    desc: Run go vet
+    cmds:
+      - go vet ./...
+
+  build:
+    desc: Build all packages
+    cmds:
+      - go build ./...
+
+  check:
+    desc: Run all CI checks locally (build, test, vet, lint, vuln)
+    cmds:
+      - task: build
+      - task: test
+      - task: vet
+      - task: lint
+      - task: vuln

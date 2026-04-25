@@ -164,7 +164,7 @@ func pkcs7Pad(data []byte, blockSize int) []byte {
 	padding := blockSize - (len(data) % blockSize)
 	pad := make([]byte, padding)
 	for i := range pad {
-		pad[i] = byte(padding) //nolint:gosec // padding bounded by blockSize (≤16)
+		pad[i] = byte(padding)
 	}
 	return append(data, pad...)
 }
@@ -181,7 +181,7 @@ func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
 		return nil, errInvalidPadding
 	}
 	for i := len(data) - padding; i < len(data); i++ {
-		if data[i] != byte(padding) { //nolint:gosec // padding bounded by blockSize (≤16)
+		if data[i] != byte(padding) {
 			return nil, errInvalidPaddingVal
 		}
 	}

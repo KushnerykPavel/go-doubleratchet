@@ -28,9 +28,9 @@ type Session struct {
 	invariants         *state2.Invariants
 	config             *Config
 	mkSkipped          *state2.Storage
+	recvChains         *state2.ReceiverChains
 	rk                 []byte
 	cks                []byte
-	recvChains         *state2.ReceiverChains // receive chains (current + up to 4 previous)
 	ns                 uint32
 	pn                 uint32
 	dhr                [32]byte
@@ -498,7 +498,7 @@ func (s *Session) performDHRatchetRecv(header Header) error {
 }
 
 // skipMessageKeys stores skipped message keys up to the target message number.
-// chain must be non-nil and is the chain for recvPK.
+// Chain must be non-nil and is the chain for recvPK.
 func (s *Session) skipMessageKeys(recvPK [32]byte, chain *state2.ReceiverChain, until uint32) error {
 	for chain.Nr < until {
 		msgKey, err := kdf.DeriveMessageKey(chain.CK)
@@ -526,7 +526,7 @@ func (s *Session) skipMessageKeys(recvPK [32]byte, chain *state2.ReceiverChain, 
 }
 
 // deriveRecvMessageKey derives the message key for message number n.
-// chain must be non-nil. Advances chain.CK past message n.
+// Chain must be non-nil. Advances chain.CK past message n.
 func (s *Session) deriveRecvMessageKey(recvPK [32]byte, chain *state2.ReceiverChain, n uint32) ([]byte, error) {
 	_ = recvPK // retained for clarity; callers already validated the chain lookup
 
@@ -647,9 +647,9 @@ func encodeHeader(h Header) []byte {
 
 func putUint32BE(b []byte, v uint32) {
 	b[0] = byte(v >> 24)
-	b[1] = byte(v >> 16) //nolint:gosec // uint32 shift always fits in byte
-	b[2] = byte(v >> 8)  //nolint:gosec // uint32 shift always fits in byte
-	b[3] = byte(v)       //nolint:gosec // uint32 low byte always fits in byte
+	b[1] = byte(v >> 16)
+	b[2] = byte(v >> 8)
+	b[3] = byte(v)
 }
 
 func bytesEqual(a, b []byte) bool {

@@ -48,6 +48,7 @@ jobs:
         uses: golangci/golangci-lint-action@v7
         with:
           version: v2.11.4
+          args: --config .golangci.yml
 
   vuln:
     name: Vulnerability Scan

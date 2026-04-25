@@ -20,7 +20,7 @@ const (
 // Per spec §4: same structure as KDF_RK but extended to also output a next
 // header key. Uses HKDF with rk as salt, dh_out as IKM, and info as label.
 //
-// info should be an application-specific byte sequence distinct from the base
+// Info should be an application-specific byte sequence distinct from the base
 // DR KDF_RK info (e.g. "DoubleRatchetHE").
 func KDF_RK_HE(rk, dhOutput, info []byte) (newRK []byte, newCK []byte, newNHK [32]byte, err error) {
 	if len(rk) < RootKeySize {

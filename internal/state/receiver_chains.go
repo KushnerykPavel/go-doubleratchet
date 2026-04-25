@@ -8,9 +8,9 @@ const ReceiverChainsMax = 5
 
 // ReceiverChain holds receive-side chain state for one DH epoch.
 type ReceiverChain struct {
-	RatchetPK [32]byte
 	CK        []byte
 	Nr        uint32
+	RatchetPK [32]byte
 }
 
 // ReceiverChains is a fixed-capacity circular buffer of receiver chains,
@@ -49,7 +49,7 @@ func (r *ReceiverChains) Push(pk [32]byte, ck []byte) {
 // Get returns a pointer to the chain for pk, or nil if not found.
 // The pointer is into the buffer; callers may mutate CK and Nr in place.
 func (r *ReceiverChains) Get(pk [32]byte) *ReceiverChain {
-	for i := 0; i < r.count; i++ {
+	for i := range r.count {
 		idx := (r.head + i) % ReceiverChainsMax
 		if subtle.ConstantTimeCompare(r.chains[idx].RatchetPK[:], pk[:]) == 1 {
 			return &r.chains[idx]
@@ -69,7 +69,7 @@ func (r *ReceiverChains) Clone() *ReceiverChains {
 		head:  r.head,
 		count: r.count,
 	}
-	for i := 0; i < ReceiverChainsMax; i++ {
+	for i := range ReceiverChainsMax {
 		src := &r.chains[i]
 		c.chains[i] = ReceiverChain{
 			RatchetPK: src.RatchetPK,
@@ -82,7 +82,7 @@ func (r *ReceiverChains) Clone() *ReceiverChains {
 
 // Clear zeros all CK material and resets the buffer to empty.
 func (r *ReceiverChains) Clear() {
-	for i := 0; i < ReceiverChainsMax; i++ {
+	for i := range ReceiverChainsMax {
 		zeroSlice(r.chains[i].CK)
 		r.chains[i] = ReceiverChain{}
 	}
