@@ -44,7 +44,7 @@ Go implementation of the Signal Double Ratchet protocol family:
 go get github.com/KushnerykPavel/go-doubleratchet
 ```
 
-Requires Go 1.26.1 or later (see `go.mod`).
+Requires Go 1.25.0 or later (see `go.mod`).
 
 ## Which Mode Should I Use?
 
