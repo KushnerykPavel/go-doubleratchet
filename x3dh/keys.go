@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 
+	"filippo.io/edwards25519"
 	"golang.org/x/crypto/curve25519"
 )
 
@@ -79,6 +80,84 @@ func GenerateOPK(keyID uint32) (OneTimePreKey, error) {
 		return OneTimePreKey{}, err
 	}
 	return OneTimePreKey{PrivateKey: priv, PublicKey: pub, KeyID: keyID}, nil
+}
+
+// ErrInvalidPublicKey is returned when a received public key fails
+// canonical or torsion-free validation.
+var ErrInvalidPublicKey = errors.New("x3dh: invalid public key")
+
+// eightInvModL is 8⁻¹ mod l (precomputed). Used for cofactor-clearing
+// torsion check: P is in the prime-order subgroup iff 8⁻¹·(8·P) == P.
+var eightInvModL = [32]byte{
+	0x79, 0x2f, 0xdc, 0xe2, 0x29, 0xe5, 0x06, 0x61,
+	0xd0, 0xda, 0x1c, 0x7d, 0xb3, 0x9d, 0xd3, 0x07,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x06,
+}
+
+// validatePublicKey checks that a Montgomery u-coordinate is canonical (u < p)
+// and torsion-free, matching libsignal's is_canonical() check.
+func validatePublicKey(pub [32]byte) error {
+	// 1. Canonical check: u < p  (p = 2^255 - 19).
+	if !scalarIsInRange(pub) {
+		return ErrInvalidPublicKey
+	}
+
+	// 2. Torsion-free check via cofactor clearing.
+	// Convert Montgomery → Edwards, then check that 8⁻¹·(8·P) == P.
+	// If P has a torsion component T (order dividing 8), then 8·P kills T,
+	// and 8⁻¹·(8·P) recovers only the prime-order component, which differs from P.
+	yBytes := montgomeryUToEdwardsYBytes(pub)
+	if yBytes == nil {
+		return ErrInvalidPublicKey
+	}
+	yBytes[31] &= 0x7F // sign=0 for torsion check (doesn't affect subgroup membership)
+	edPoint, err := new(edwards25519.Point).SetBytes(yBytes)
+	if err != nil {
+		return ErrInvalidPublicKey
+	}
+
+	eightBytes := [32]byte{8}
+	eightScalar, err := edwards25519.NewScalar().SetCanonicalBytes(eightBytes[:])
+	if err != nil {
+		return ErrInvalidPublicKey
+	}
+	eightInvScalar, err := edwards25519.NewScalar().SetCanonicalBytes(eightInvModL[:])
+	if err != nil {
+		return ErrInvalidPublicKey
+	}
+
+	// cleared = 8⁻¹ · (8 · P)  — strips any torsion component.
+	cofactorP := new(edwards25519.Point).ScalarMult(eightScalar, edPoint)
+	cleared := new(edwards25519.Point).ScalarMult(eightInvScalar, cofactorP)
+
+	if cleared.Equal(edPoint) != 1 {
+		return ErrInvalidPublicKey
+	}
+	return nil
+}
+
+// scalarIsInRange checks u < p (2^255 - 19) after clearing the high bit.
+// Mirrors libsignal's scalar_is_in_range in curve.rs.
+func scalarIsInRange(k [32]byte) bool {
+	// High bit must be clear.
+	if k[31]&0x80 != 0 {
+		return false
+	}
+	// Reject if k[0] >= 237 (0xED = 256-19) AND k[1..30] all 0xFF AND k[31] == 0x7F.
+	if k[0] >= 0xED {
+		allFF := true
+		for i := 1; i < 31; i++ {
+			if k[i] != 0xFF {
+				allFF = false
+				break
+			}
+		}
+		if allFF && k[31] == 0x7F {
+			return false
+		}
+	}
+	return true
 }
 
 // generateX25519KeyPair generates a clamped X25519 key pair.

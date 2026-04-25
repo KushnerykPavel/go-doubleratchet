@@ -45,6 +45,19 @@ const x3dhInfo = "X3DH"
 //
 // The ephemeral private key is zeroed before this function returns.
 func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult, InitialMessage, error) {
+	// Validate received public keys before any computation.
+	if err := validatePublicKey(bundle.IdentityKey); err != nil {
+		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: bundle identity key: %w", err)
+	}
+	if err := validatePublicKey(bundle.SignedPreKey); err != nil {
+		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: bundle signed prekey: %w", err)
+	}
+	if bundle.OneTimePreKey != nil {
+		if err := validatePublicKey(*bundle.OneTimePreKey); err != nil {
+			return HandshakeResult{}, InitialMessage{}, fmt.Errorf("x3dh: bundle one-time prekey: %w", err)
+		}
+	}
+
 	// Verify SPK signature before any DH computation.
 	if !xeddsaVerify(bundle.IdentityKey, bundle.SignedPreKey[:], bundle.SPKSignature) {
 		return HandshakeResult{}, InitialMessage{}, ErrInvalidSPKSignature
@@ -109,6 +122,14 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 // The opk parameter must be the OneTimePreKey identified by msg.OPKID, or nil if msg.OPKID is nil.
 // After ReceiveHandshake returns successfully, the caller must discard the used OPK.
 func ReceiveHandshake(receiverIK IdentityKey, spk *SignedPreKey, opk *OneTimePreKey, msg InitialMessage) (HandshakeResult, error) {
+	// Validate received public keys before any computation.
+	if err := validatePublicKey(msg.IdentityKey); err != nil {
+		return HandshakeResult{}, fmt.Errorf("x3dh: sender identity key: %w", err)
+	}
+	if err := validatePublicKey(msg.EphemeralKey); err != nil {
+		return HandshakeResult{}, fmt.Errorf("x3dh: sender ephemeral key: %w", err)
+	}
+
 	// DH1 = DH(SPKB_priv, IKA_pub)
 	dh1, err := dhX25519(spk.PrivateKey, msg.IdentityKey)
 	if err != nil {

@@ -14,17 +14,11 @@ import (
 	"crypto/rand"
 	"crypto/sha512"
 	"io"
-	"math/big"
 
 	"filippo.io/edwards25519"
+	"filippo.io/edwards25519/field"
 )
 
-// fieldPrime is p = 2^255 - 19, the field prime for Curve25519 / Ed25519.
-var fieldPrime = func() *big.Int {
-	p := new(big.Int).Lsh(big.NewInt(1), 255)
-	p.Sub(p, big.NewInt(19))
-	return p
-}()
 
 // xeddsaHashPrefix is [0xFE, 0xFF×31] used to domain-separate the nonce hash
 // from the challenge hash.
@@ -172,33 +166,26 @@ func xeddsaVerify(xPub [32]byte, message []byte, sig [64]byte) bool {
 // the 32-byte little-endian encoding of the Edwards y-coordinate via
 // y = (u − 1) · (u + 1)⁻¹ mod p.
 //
+// All arithmetic is constant-time via filippo.io/edwards25519/field.
 // Returns nil if u+1 ≡ 0 (mod p), i.e., u = p−1, which is an invalid key.
 func montgomeryUToEdwardsYBytes(u [32]byte) []byte {
-	// Convert 32-byte LE to big-endian for math/big.
-	uBE := make([]byte, 32)
-	for i, b := range u {
-		uBE[31-i] = b
+	uElem, err := new(field.Element).SetBytes(u[:])
+	if err != nil {
+		return nil
 	}
-	uInt := new(big.Int).SetBytes(uBE)
+	one := new(field.Element).One()
+	uMinus1 := new(field.Element).Subtract(uElem, one)
+	uPlus1 := new(field.Element).Add(uElem, one)
 
-	one := big.NewInt(1)
-	uMinus1 := new(big.Int).Sub(uInt, one)
-	uPlus1 := new(big.Int).Add(uInt, one)
-
-	uPlus1Inv := new(big.Int).ModInverse(uPlus1, fieldPrime)
-	if uPlus1Inv == nil {
-		// u = p−1 → denominator is 0; invalid key.
+	// Check u+1 ≡ 0 (mod p) — constant-time.
+	zero := new(field.Element)
+	if uPlus1.Equal(zero) == 1 {
 		return nil
 	}
 
-	y := new(big.Int).Mul(uMinus1, uPlus1Inv)
-	y.Mod(y, fieldPrime)
+	uPlus1Inv := new(field.Element).Invert(uPlus1)
+	y := new(field.Element).Multiply(uMinus1, uPlus1Inv)
 
-	// Encode as 32-byte LE.
-	yBE := y.Bytes()
-	yLE := make([]byte, 32)
-	for i, b := range yBE {
-		yLE[len(yBE)-1-i] = b
-	}
-	return yLE
+	yBytes := y.Bytes()
+	return yBytes
 }
