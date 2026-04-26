@@ -145,7 +145,7 @@ func (s *TripleRatchetSession) Encrypt(plaintext, ad []byte) (TripleRatchetMessa
 	}
 
 	// Step 2: derive PQ component key and SCKA message.
-	sckaMsg, _, pqN, pqMK, err := s.spqr.sendKey()
+	sckaMsg, pqN, pqMK, err := s.spqr.sendKey()
 	if err != nil {
 		rollback()
 		return TripleRatchetMessage{}, err

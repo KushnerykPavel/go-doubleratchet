@@ -139,20 +139,21 @@ func (s *SPQRSession) Close() error {
 
 // sendKey derives the next message key for sending.
 // Message numbers are 0-indexed: first message has N=0.
-func (s *SPQRSession) sendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, err error) {
+func (s *SPQRSession) sendKey() (msg []byte, n uint32, mk []byte, err error) {
+	var sendingEpoch uint32
 	msg, sendingEpoch, outputKey, keyEpoch, err := s.scka.Send()
 	if err != nil {
-		return nil, 0, 0, nil, err
+		return nil, 0, nil, err
 	}
 
 	if outputKey != nil {
 		if s.epoch+1 != keyEpoch {
-			return nil, 0, 0, nil, ErrEpochMismatch
+			return nil, 0, nil, ErrEpochMismatch
 		}
 
 		newRK, cks, ckr, err := kdf.RatchetRootKeySPQR(s.rk, outputKey)
 		if err != nil {
-			return nil, 0, 0, nil, err
+			return nil, 0, nil, err
 		}
 		s.rk = newRK
 
@@ -178,23 +179,23 @@ func (s *SPQRSession) sendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, 
 
 	chain, ok := s.kdfChains[sendingEpoch]
 	if !ok || chain == nil || chain.Send == nil {
-		return nil, 0, 0, nil, ErrInvalidTransition
+		return nil, 0, nil, ErrInvalidTransition
 	}
 
 	// 0-indexed: current N is the message number, then advance.
 	n = chain.Send.N
 	chain.Send.CK, mk, err = kdf.RatchetChainKeySPQR(chain.Send.CK, n)
 	if err != nil {
-		return nil, 0, 0, nil, err
+		return nil, 0, nil, err
 	}
 	chain.Send.N = n + 1
 
-	return msg, sendingEpoch, n, mk, nil
+	return msg, n, mk, nil
 }
 
 // Encrypt encrypts a plaintext message using the SPQR.
 func (s *SPQRSession) Encrypt(plaintext, ad []byte) (header *SCKAHeader, ciphertext []byte, err error) {
-	msg, _, n, mk, err := s.sendKey()
+	msg, n, mk, err := s.sendKey()
 	if err != nil {
 		return nil, nil, err
 	}

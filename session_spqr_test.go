@@ -120,12 +120,12 @@ func TestSendKeyDerivesUniqueKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	// First SendKey — 0-indexed: first message has N=0.
-	_, _, n1, mk1, err := session.sendKey()
+	_, n1, mk1, err := session.sendKey()
 	require.NoError(t, err)
 	require.EqualValues(t, 0, n1, "expected n=0 for first message")
 
 	// Second SendKey — second message has N=1.
-	_, _, n2, mk2, err := session.sendKey()
+	_, n2, mk2, err := session.sendKey()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n2, "expected n=1 for second message")
 

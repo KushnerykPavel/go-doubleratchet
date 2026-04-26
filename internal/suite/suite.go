@@ -11,8 +11,9 @@ import (
 	"errors"
 	"io"
 
-	"github.com/KushnerykPavel/go-doubleratchet/internal/padding"
 	"golang.org/x/crypto/hkdf"
+
+	"github.com/KushnerykPavel/go-doubleratchet/internal/padding"
 )
 
 const (
@@ -123,4 +124,3 @@ func deriveKeys(msgKey, info []byte) (encKey, authKey, iv []byte, err error) {
 	}
 	return derived[:32], derived[32:64], derived[64:80], nil
 }
-

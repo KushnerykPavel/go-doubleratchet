@@ -1,3 +1,4 @@
+// Package padding implements PKCS#7 padding and unpadding.
 package padding
 
 import "errors"
@@ -9,6 +10,7 @@ var (
 	errInvalidPaddingVal = errors.New("invalid padding value")
 )
 
+// PKCS7Pad appends PKCS#7 padding to data to align it to blockSize.
 func PKCS7Pad(data []byte, blockSize int) []byte {
 	padding := blockSize - (len(data) % blockSize)
 	pad := make([]byte, padding)
@@ -18,6 +20,7 @@ func PKCS7Pad(data []byte, blockSize int) []byte {
 	return append(data, pad...)
 }
 
+// PKCS7Unpad removes PKCS#7 padding from data, returning an error if padding is invalid.
 func PKCS7Unpad(data []byte, blockSize int) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, errEmptyData

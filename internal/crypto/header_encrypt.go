@@ -41,7 +41,6 @@ var ErrInvalidHeaderKey = errors.New("invalid header key")
 // ErrInvalidNonceCounter is returned when the nonce counter would overflow.
 var ErrInvalidNonceCounter = errors.New("invalid nonce counter")
 
-
 // EncryptHeader encrypts a header using AES-256-CBC + HMAC-SHA256.
 //
 // Per spec §4.2: EncryptHeader(hk, plaintext) — no associated data parameter.
@@ -154,4 +153,3 @@ func isZeroed(b []byte) bool {
 	}
 	return true
 }
-

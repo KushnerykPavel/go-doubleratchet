@@ -25,4 +25,3 @@ type KDFChainPair struct {
 	// Receive is the receiving chain.
 	Receive *KDFChain
 }
-

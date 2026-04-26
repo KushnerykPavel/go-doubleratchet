@@ -651,4 +651,3 @@ func encodeHeader(h Header) []byte {
 func bytesEqual(a, b []byte) bool {
 	return subtle.ConstantTimeCompare(a, b) == 1
 }
-

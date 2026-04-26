@@ -129,13 +129,13 @@ type KEMPreKey struct {
 }
 
 // DecapsKey returns the decapsulation key material for use in ReceiveHandshake.
-func (k *KEMSignedPreKey) DecapsKey() KEMPreKey {
-	return KEMPreKey{EncapsulationKey: k.EncapsulationKey, Seed: k.Seed, Params: k.Params}
+func (k *KEMSignedPreKey) DecapsKey() *KEMPreKey {
+	return &KEMPreKey{EncapsulationKey: k.EncapsulationKey, Seed: k.Seed, Params: k.Params}
 }
 
 // DecapsKey returns the decapsulation key material for use in ReceiveHandshake.
-func (k *KEMOneTimePreKey) DecapsKey() KEMPreKey {
-	return KEMPreKey{EncapsulationKey: k.EncapsulationKey, Seed: k.Seed, Params: k.Params}
+func (k *KEMOneTimePreKey) DecapsKey() *KEMPreKey {
+	return &KEMPreKey{EncapsulationKey: k.EncapsulationKey, Seed: k.Seed, Params: k.Params}
 }
 
 // GenerateKEMSPK generates a signed last-resort KEM prekey.
@@ -203,7 +203,7 @@ func kemEncapsulate(encapKeyBytes []byte, params KEMParams) (ct, ss []byte, err 
 }
 
 // kemDecapsulate decapsulates a shared secret using the seed to reconstruct the decapsulation key.
-func kemDecapsulate(pqpk KEMPreKey, ciphertext []byte) (ss []byte, err error) {
+func kemDecapsulate(pqpk *KEMPreKey, ciphertext []byte) (ss []byte, err error) {
 	ops, ok := kemRegistry[pqpk.Params]
 	if !ok {
 		return nil, ErrUnsupportedKEMParams

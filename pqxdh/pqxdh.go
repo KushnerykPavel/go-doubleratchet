@@ -155,7 +155,7 @@ func ReceiveHandshake(
 	receiverIK IdentityKey,
 	spk *SignedPreKey,
 	opk *OneTimePreKey,
-	pqpk KEMPreKey,
+	pqpk *KEMPreKey,
 	msg *InitialMessage,
 ) (HandshakeResult, error) {
 	// Guard: KEMParams in the message must match the key Bob has stored.
@@ -270,4 +270,3 @@ func buildAD(ikaPublic, ikbPublic [32]byte, pqPreKey []byte) []byte {
 	copy(ad[64:], pqPreKey)
 	return ad
 }
-
