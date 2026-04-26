@@ -18,9 +18,9 @@ var (
 // ErrInvalidInput is returned for invalid inputs.
 var ErrInvalidInput = errors.New("invalid input")
 
-// SCKAInit derives initial RK, CKs, CKr from SK.
+// DeriveInitialChainsSPQR derives initial RK, CKs, CKr from SK.
 // Returns (rk, cks, ckr) each 32 bytes.
-func SCKAInit(sk []byte) (rk, cks, ckr []byte, err error) {
+func DeriveInitialChainsSPQR(sk []byte) (rk, cks, ckr []byte, err error) {
 	if len(sk) < 32 {
 		return nil, nil, nil, ErrInvalidInput
 	}
@@ -33,8 +33,8 @@ func SCKAInit(sk []byte) (rk, cks, ckr []byte, err error) {
 	return splitTriple(okm)
 }
 
-// SCKARatchetRK derives new RK, CKs, CKr from current RK and SCKA output.
-func SCKARatchetRK(rk, sckaOutput []byte) (newRK, cks, ckr []byte, err error) {
+// RatchetRootKeySPQR derives new RK, CKs, CKr from current RK and SCKA output.
+func RatchetRootKeySPQR(rk, sckaOutput []byte) (newRK, cks, ckr []byte, err error) {
 	if len(rk) < 32 || len(sckaOutput) < 32 {
 		return nil, nil, nil, ErrInvalidInput
 	}
@@ -47,8 +47,8 @@ func SCKARatchetRK(rk, sckaOutput []byte) (newRK, cks, ckr []byte, err error) {
 	return splitTriple(okm)
 }
 
-// SCKARatchetCK derives next chain key and message key from current chain key.
-func SCKARatchetCK(ck []byte, ctr uint32) (nextCK, mk []byte, err error) {
+// RatchetChainKeySPQR derives next chain key and message key from current chain key.
+func RatchetChainKeySPQR(ck []byte, ctr uint32) (nextCK, mk []byte, err error) {
 	if len(ck) < 32 {
 		return nil, nil, ErrInvalidInput
 	}

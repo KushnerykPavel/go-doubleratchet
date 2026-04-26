@@ -23,6 +23,18 @@ const (
 	MLKEM1024
 )
 
+// String returns the human-readable name of the KEM parameter set.
+func (p KEMParams) String() string {
+	switch p {
+	case MLKEM768:
+		return "ML-KEM-768"
+	case MLKEM1024:
+		return "ML-KEM-1024"
+	default:
+		return "unknown"
+	}
+}
+
 // kemSeedSize is the seed size for ML-KEM key generation (64 bytes: d‖z per FIPS 203).
 const kemSeedSize = 64
 
@@ -111,18 +123,19 @@ type KEMOneTimePreKey struct {
 // KEMPreKey bundles the seed and parameter set needed for decapsulation.
 // Obtain it from KEMSignedPreKey.DecapsKey() or KEMOneTimePreKey.DecapsKey().
 type KEMPreKey struct {
-	Seed   [kemSeedSize]byte
-	Params KEMParams
+	EncapsulationKey []byte
+	Seed             [kemSeedSize]byte
+	Params           KEMParams
 }
 
 // DecapsKey returns the decapsulation key material for use in ReceiveHandshake.
 func (k *KEMSignedPreKey) DecapsKey() KEMPreKey {
-	return KEMPreKey{Seed: k.Seed, Params: k.Params}
+	return KEMPreKey{EncapsulationKey: k.EncapsulationKey, Seed: k.Seed, Params: k.Params}
 }
 
 // DecapsKey returns the decapsulation key material for use in ReceiveHandshake.
 func (k *KEMOneTimePreKey) DecapsKey() KEMPreKey {
-	return KEMPreKey{Seed: k.Seed, Params: k.Params}
+	return KEMPreKey{EncapsulationKey: k.EncapsulationKey, Seed: k.Seed, Params: k.Params}
 }
 
 // GenerateKEMSPK generates a signed last-resort KEM prekey.

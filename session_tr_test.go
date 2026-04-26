@@ -376,5 +376,5 @@ func TestTRInvalidInputNilSCKAHeader(t *testing.T) {
 		Ciphertext: []byte("ct"),
 	}
 	_, err := bob.Decrypt(msg, []byte("ad"))
-	require.ErrorIs(t, err, ErrInvalidInput)
+	require.ErrorIs(t, err, ErrNilSCKAHeader)
 }

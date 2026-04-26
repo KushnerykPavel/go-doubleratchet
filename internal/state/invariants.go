@@ -3,6 +3,8 @@ package state
 import (
 	"crypto/subtle"
 	"errors"
+
+	"github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
 )
 
 // ErrInvariantViolation is returned when an invariant check fails.
@@ -70,8 +72,8 @@ func (inv *Invariants) GetPrevState() PrevState {
 
 // Clear zeros all key material stored in the invariants snapshot.
 func (inv *Invariants) Clear() {
-	zeroSlice(inv.prevRK)
-	zeroSlice(inv.prevCKs)
+	crypto.ZeroBytes(inv.prevRK)
+	crypto.ZeroBytes(inv.prevCKs)
 	for i := range inv.prevDHs {
 		inv.prevDHs[i] = 0
 	}
@@ -122,8 +124,3 @@ func copyBytes(b []byte) []byte {
 	return c
 }
 
-func zeroSlice(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
-}

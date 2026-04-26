@@ -55,22 +55,3 @@ func BenchmarkSharedSecret(b *testing.B) {
 		}
 	}
 }
-
-func BenchmarkDHRatchet(b *testing.B) {
-	b.ReportAllocs()
-	privA, _, err := GenerateKeyPair()
-	if err != nil {
-		b.Fatal(err)
-	}
-	_, pubB, err := GenerateKeyPair()
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-	for b.Loop() {
-		_, err := DHRatchet(privA, pubB)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}

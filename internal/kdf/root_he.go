@@ -16,7 +16,7 @@ const (
 // ErrRootKeyTooShort is returned when the root key is shorter than required.
 var ErrRootKeyTooShort = errors.New("root key too short")
 
-// RRKHE implements standard HKDF-SHA256 for the header-encryption variant
+// DeriveRootKeyHE implements standard HKDF-SHA256 for the header-encryption variant
 // of the root KDF. Produces 96 bytes split into (newRK, newCK, newNHK).
 //
 // Per spec §4: same structure as KDF_RK but extended to also output a next
@@ -24,7 +24,7 @@ var ErrRootKeyTooShort = errors.New("root key too short")
 //
 // The info parameter should be an application-specific byte sequence distinct from the base
 // DR KDF_RK info (e.g. "DoubleRatchetHE").
-func RRKHE(rk, dhOutput, info []byte) (newRK, newCK []byte, newNHK [32]byte, err error) {
+func DeriveRootKeyHE(rk, dhOutput, info []byte) (newRK, newCK []byte, newNHK [32]byte, err error) {
 	if len(rk) < RootKeySize {
 		return nil, nil, [32]byte{}, ErrRootKeyTooShort
 	}

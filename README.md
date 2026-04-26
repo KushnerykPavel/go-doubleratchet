@@ -14,7 +14,7 @@ Go implementation of the Signal protocol family:
 - Sparse Post-Quantum Ratchet / SPQR (section 5)
 - Triple Ratchet / hybrid EC+PQ (section 6)
 
-> **Unofficial implementation.** This library implements the [Signal Double Ratchet specification](https://signal.org/docs/specifications/doubleratchet/) independently. It is not affiliated with, endorsed by, or wire-compatible with Signal Messenger or the official [libsignal](https://github.com/signalapp/libsignal) library.
+> **Unofficial implementation.** This library implements the [Signal Double Ratchet specification](https://signal.org/docs/specifications/doubleratchet/) independently. It is not affiliated with, endorsed by, or wire-compatible with Signal Messenger or the official [libsignal](https://github.com/signalapp/libsignal) library. Default KDF info strings match libsignal (`"WhisperRatchet"`, `"WhisperMessageKeys"`) for interoperability where possible.
 
 > **Status:** Pre-1.0. The API may change between minor versions until a v1.0.0 tag is cut. Pin your dependency to a specific version.
 
@@ -100,9 +100,9 @@ bobResult, _ := x3dh.ReceiveHandshake(bobIK, &bobSPK, &bobOPK, initMsg)
 // --- Both sides: seed the Double Ratchet ---
 
 // Alice uses Bob's SPK as the initial DR ratchet key (Signal convention).
-aliceSess, _ := doubleratchet.InitAlice(aliceResult.SharedSecret[:], bobSPK.PublicKey, nil)
+aliceSess, _ := doubleratchet.InitInitiator(aliceResult.SharedSecret[:], bobSPK.PublicKey, nil)
 bobRatchetKP := doubleratchet.KeyPair{PrivateKey: bobSPK.PrivateKey, PublicKey: bobSPK.PublicKey}
-bobSess, _   := doubleratchet.InitBob(bobResult.SharedSecret[:], bobRatchetKP, nil)
+bobSess, _   := doubleratchet.InitResponder(bobResult.SharedSecret[:], bobRatchetKP, nil)
 
 ad := aliceResult.AD // IKA_pub ‖ IKB_pub
 msg, _      := aliceSess.Encrypt([]byte("hello"), ad)
@@ -220,17 +220,18 @@ func main() {
 	}
 	bobKeyPair := doubleratchet.KeyPair{PrivateKey: bobPriv, PublicKey: bobPub}
 
-	// Use BindIdentities to create AD that prevents cross-session replay.
+	// Set identity keys in Config to bind messages to identity keys
+	// and prevent cross-session replay (matches Signal spec §3.3).
 	// senderPK and receiverPK come from your handshake (e.g. X3DH identity keys).
-	ad := doubleratchet.BindIdentities(senderIdentityPK, receiverIdentityPK)
+	ad := []byte("conversation-123")
 
-	alice, err := doubleratchet.InitAlice(sharedSecret, bobPub, nil)
+	alice, err := doubleratchet.InitInitiator(sharedSecret, bobPub, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer alice.Close()
 
-	bob, err := doubleratchet.InitBob(sharedSecret, bobKeyPair, nil)
+	bob, err := doubleratchet.InitResponder(sharedSecret, bobKeyPair, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -252,11 +253,11 @@ func main() {
 
 `Encrypt` returns a `doubleratchet.Message`, which contains a typed `Header` and `Ciphertext`.
 
-> **Naming:** `InitAlice`/`InitBob` are convenience aliases for `InitInitiator`/`InitResponder`. Both sets are equivalent — use whichever reads better in your code. The same applies to HE, SPQR, and Triple Ratchet variants.
+> **Naming:** `InitAlice`/`InitBob` are aliases for `InitInitiator`/`InitResponder`, following Signal spec naming where Alice is the initiator and Bob is the responder. Both sets are equivalent — use whichever reads better in your code. The same applies to HE, SPQR, and Triple Ratchet variants.
 
 ## Header Encryption
 
-Header encryption hides the Double Ratchet header. Use `EncryptHE` and `DecryptHE`; the embedded base `Encrypt` and `Decrypt` methods on `HESession` intentionally return `ErrInvalidTransition`.
+Header encryption hides the Double Ratchet header. Use `EncryptHE` and `DecryptHE`. `HESession` uses composition (not embedding), so base `Session` methods are not exposed.
 
 ```go
 package main
@@ -287,13 +288,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	alice, err := doubleratchet.InitAliceHE(sharedSecret, bobPub, sharedHKA, sharedNHKB, nil)
+	alice, err := doubleratchet.InitInitiatorHE(sharedSecret, bobPub, sharedHKA, sharedNHKB, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer alice.Close()
 
-	bob, err := doubleratchet.InitBobHE(sharedSecret, bobKeyPair, sharedHKA, sharedNHKB, nil)
+	bob, err := doubleratchet.InitResponderHE(sharedSecret, bobKeyPair, sharedHKA, sharedNHKB, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -334,13 +335,13 @@ func main() {
 	aliceSCKA := &sckatest.MockSCKA{}
 	bobSCKA := &sckatest.MockSCKA{}
 
-	alice, err := doubleratchet.InitAliceSCKA(sharedSecret, aliceSCKA, nil)
+	alice, err := doubleratchet.InitInitiatorSCKA(sharedSecret, aliceSCKA, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer alice.Close()
 
-	bob, err := doubleratchet.InitBobSCKA(sharedSecret, bobSCKA, nil)
+	bob, err := doubleratchet.InitResponderSCKA(sharedSecret, bobSCKA, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -387,13 +388,13 @@ func main() {
 	aliceSCKA := &sckatest.MockSCKA{}
 	bobSCKA := &sckatest.MockSCKA{}
 
-	alice, err := doubleratchet.InitAliceTripleRatchet(sharedSecret, bobPub, aliceSCKA, nil)
+	alice, err := doubleratchet.InitInitiatorTripleRatchet(sharedSecret, bobPub, aliceSCKA, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer alice.Close()
 
-	bob, err := doubleratchet.InitBobTripleRatchet(sharedSecret, bobKeyPair, bobSCKA, nil)
+	bob, err := doubleratchet.InitResponderTripleRatchet(sharedSecret, bobKeyPair, bobSCKA, nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -427,13 +428,13 @@ cfg := &doubleratchet.Config{
 }
 ```
 
-`MaxSkip` bounds how many skipped message keys can be retained for out-of-order delivery. A zero `MaxSkip` means `DefaultMaxSkip` (`1000`). The info strings are HKDF domain-separation labels; both parties must use identical values or messages will not decrypt.
+`MaxSkip` bounds how many skipped message keys can be retained for out-of-order delivery. A zero `MaxSkip` means `DefaultMaxSkip` (`1000`). The info strings are HKDF domain-separation labels; both parties must use identical values or messages will not decrypt. Defaults match libsignal: `"WhisperRatchet"` for KDF_RK and `"WhisperMessageKeys"` for ENCRYPT key expansion.
 
 ## Associated Data
 
 Every encryption method accepts `ad []byte` as additional authenticated data. It is authenticated but not encrypted. Use it for stable transport context such as conversation ID, protocol version, sender/receiver identifiers, or transcript binding.
 
-Use `BindIdentities(senderPK, receiverPK)` to construct a 64-byte AD prefix from both parties' identity public keys. This prevents cross-session replay of message key material and matches Signal spec section 3.3.
+Set `Config.LocalIdentityKey` and `Config.RemoteIdentityKey` to automatically bind messages to both parties' identity keys (64-byte prefix prepended to AD). This prevents cross-session replay of message key material and matches Signal spec section 3.3.
 
 The same associated data must be provided to decrypt. A mismatch returns `ErrAuthFailure`.
 
@@ -443,12 +444,15 @@ The root package exposes sentinel errors suitable for `errors.Is` or direct comp
 
 | Error | Meaning |
 |---|---|
-| `ErrInvalidInput` | Malformed inputs, short shared secrets, invalid ratchet keys, or nil SCKA provider. |
+| `ErrInvalidInput` | Malformed inputs or invalid ratchet keys. |
+| `ErrSharedSecretTooShort` | Shared secret must be at least 32 bytes. |
+| `ErrNilProvider` | SCKA provider must not be nil. |
+| `ErrNilSCKAHeader` | SCKA header must not be nil. |
 | `ErrMaxSkipExceeded` | A received message would require retaining more skipped keys than `MaxSkip`. |
 | `ErrSkippedKeyNotFound` | A skipped key is missing, usually because a message was replayed or state is desynchronized. |
 | `ErrAuthFailure` | Ciphertext, header, or associated data authentication failed. |
 | `ErrInvalidTransition` | The operation is invalid for the session state or mode. |
-| `ErrSessionNotInitialized` | Bob tried to send before receiving Alice's first message. |
+| `ErrSessionNotInitialized` | Responder tried to send before receiving Initiator's first message. |
 | `ErrEpochMismatch` | SPQR epoch advancement was inconsistent. |
 
 Example:
@@ -486,8 +490,8 @@ SPQR and Triple Ratchet depend on `scka.Provider`:
 
 ```go
 type Provider interface {
-	InitAlice(sk []byte) error
-	InitBob(sk []byte) error
+	InitInitiator(sk []byte) error
+	InitResponder(sk []byte) error
 	Send() (msg []byte, sendingEpoch uint32, outputKey []byte, keyEpoch uint32, err error)
 	Receive(msg []byte) (receivingEpoch uint32, outputKey []byte, keyEpoch uint32, err error)
 	Snapshot() any
@@ -538,8 +542,8 @@ The root package re-exports everything most applications need. These sub-package
 |---|---|---|
 | `x3dh` | `go-doubleratchet/x3dh` | X3DH key agreement: key generation, XEdDSA signatures, `SendHandshake`/`ReceiveHandshake`. |
 | `pqxdh` | `go-doubleratchet/pqxdh` | PQXDH key agreement: X3DH + ML-KEM post-quantum KEM, 96-byte output (root key + chain key + PQR key). |
-| `crypto` | `go-doubleratchet/crypto` | X25519 key generation, DH shared secret, header encryption primitives (`HENCRYPT`/`HDECRYPT`). |
-| `kdf` | `go-doubleratchet/kdf` | Chain KDF, root KDF, HE root KDF, SPQR KDF functions. |
+| `crypto` | `go-doubleratchet/internal/crypto` | X25519 key generation, DH shared secret, header encryption primitives (`EncryptHeader`/`DecryptHeader`). Internal. |
+| `kdf` | `go-doubleratchet/internal/kdf` | Chain KDF, root KDF (`DeriveRootKeyHE`), SPQR KDF functions. Internal. |
 | `scka` | `go-doubleratchet/scka` | `Provider` interface for post-quantum SCKA implementations. |
 | `scka/testing` | `go-doubleratchet/scka/testing` | `MockSCKA` test/example implementation. Not for production. |
 

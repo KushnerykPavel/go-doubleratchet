@@ -120,12 +120,12 @@ func TestSendKeyDerivesUniqueKeys(t *testing.T) {
 	require.NoError(t, err)
 
 	// First SendKey — 0-indexed: first message has N=0.
-	_, _, n1, mk1, err := session.SendKey()
+	_, _, n1, mk1, err := session.sendKey()
 	require.NoError(t, err)
 	require.EqualValues(t, 0, n1, "expected n=0 for first message")
 
 	// Second SendKey — second message has N=1.
-	_, _, n2, mk2, err := session.SendKey()
+	_, _, n2, mk2, err := session.sendKey()
 	require.NoError(t, err)
 	require.EqualValues(t, 1, n2, "expected n=1 for second message")
 
@@ -220,7 +220,7 @@ func TestKDFSCKAINIT(t *testing.T) {
 		sk[i] = byte(i)
 	}
 
-	rk, cks, ckr, err := kdf.SCKAInit(sk)
+	rk, cks, ckr, err := kdf.DeriveInitialChainsSPQR(sk)
 	require.NoError(t, err)
 
 	require.Len(t, rk, 32)
@@ -248,7 +248,7 @@ func TestKDFSCKARK(t *testing.T) {
 		sckaOutput[i] = byte(i + 10)
 	}
 
-	newRK, cks, ckr, err := kdf.SCKARatchetRK(rk, sckaOutput)
+	newRK, cks, ckr, err := kdf.RatchetRootKeySPQR(rk, sckaOutput)
 	require.NoError(t, err)
 
 	require.Len(t, newRK, 32)
@@ -271,7 +271,7 @@ func TestKDFSCKACK(t *testing.T) {
 		ck[i] = byte(i)
 	}
 
-	nextCK, mk, err := kdf.SCKARatchetCK(ck, 0)
+	nextCK, mk, err := kdf.RatchetChainKeySPQR(ck, 0)
 	require.NoError(t, err)
 
 	require.Len(t, nextCK, 32)
@@ -281,7 +281,7 @@ func TestKDFSCKACK(t *testing.T) {
 	require.NotEqual(t, nextCK, mk, "nextCK and mk should be different")
 
 	// Advancing with different counter should give different keys.
-	nextCK2, mk2, err := kdf.SCKARatchetCK(ck, 1)
+	nextCK2, mk2, err := kdf.RatchetChainKeySPQR(ck, 1)
 	require.NoError(t, err)
 
 	require.NotEqual(t, nextCK, nextCK2, "nextCK for ctr=0 and ctr=1 should differ")
@@ -339,7 +339,7 @@ func TestTrySkippedMessageKeys(t *testing.T) {
 	}
 
 	// No skipped keys yet.
-	mk := session.TrySkippedMessageKeys(0, 5)
+	mk := session.trySkippedMessageKeys(0, 5)
 	require.Nil(t, mk)
 
 	// Store a skipped key.
@@ -348,12 +348,12 @@ func TestTrySkippedMessageKeys(t *testing.T) {
 	}
 
 	// Retrieve it.
-	mk = session.TrySkippedMessageKeys(0, 5)
+	mk = session.trySkippedMessageKeys(0, 5)
 	require.NotNil(t, mk)
 	require.Equal(t, []byte("key5"), mk)
 
 	// Should be deleted after retrieval.
-	mk = session.TrySkippedMessageKeys(0, 5)
+	mk = session.trySkippedMessageKeys(0, 5)
 	require.Nil(t, mk)
 }
 
@@ -379,7 +379,7 @@ func TestSkipMessageKeys(t *testing.T) {
 	}
 
 	// Skip to message 3 (0-indexed: stores N=0, N=1, N=2).
-	err := session.SkipMessageKeys(0, 3)
+	err := session.skipMessageKeysSPQR(0, 3)
 	require.NoError(t, err)
 
 	// Should have stored keys for messages 0, 1, and 2.
@@ -388,7 +388,7 @@ func TestSkipMessageKeys(t *testing.T) {
 
 	// Keys should be retrievable.
 	for n := range uint32(3) {
-		mk := session.TrySkippedMessageKeys(0, n)
+		mk := session.trySkippedMessageKeys(0, n)
 		require.NotNil(t, mk, "expected to retrieve key for n=%d", n)
 	}
 }
@@ -531,7 +531,7 @@ func TestClearOldEpochsZerosKeyMaterial(t *testing.T) {
 	}
 
 	// ClearOldEpochs(2) clears epochs < 1 (i.e., epoch 0).
-	session.ClearOldEpochs(2)
+	session.clearOldEpochs(2)
 
 	// Epoch 0 chain keys and message keys must be zeroed in the original slices.
 	require.Equal(t, make([]byte, len(ck0Send)), ck0Send, "ck0Send must be zeroed before epoch removal")
@@ -562,7 +562,7 @@ func TestClearOldEpochs(t *testing.T) {
 	}
 
 	// Clear epochs older than sendingEpoch 2.
-	session.ClearOldEpochs(2)
+	session.clearOldEpochs(2)
 
 	// Epochs 0 should be cleared.
 	require.NotContains(t, session.kdfChains, uint32(0), "KDFChains[0] should be cleared")
@@ -596,7 +596,7 @@ func TestClearOldEpochsRemovesAllEpochsOlderThanPrevious(t *testing.T) {
 		maxSkip: 1000,
 	}
 
-	session.ClearOldEpochs(3)
+	session.clearOldEpochs(3)
 
 	require.NotContains(t, session.kdfChains, uint32(0))
 	require.NotContains(t, session.kdfChains, uint32(1))
@@ -632,7 +632,7 @@ func TestReceiveKeyClearsOldEpochs(t *testing.T) {
 	}
 
 	// 0-indexed: first message of epoch 2 has N=0.
-	receivingEpoch, _, err := session.ReceiveKey(&SCKAHeader{Msg: []byte("epoch-2"), N: 0})
+	receivingEpoch, _, err := session.receiveKey(&SCKAHeader{Msg: []byte("epoch-2"), N: 0})
 	require.NoError(t, err)
 	require.EqualValues(t, 2, receivingEpoch)
 	require.NotContains(t, session.kdfChains, uint32(0), "KDFChains[0] should be cleared after receive-side epoch advance")
@@ -661,7 +661,7 @@ func TestMaxSkipExceeded(t *testing.T) {
 	}
 
 	// Try to skip beyond MaxSkip.
-	err := session.SkipMessageKeys(0, 10)
+	err := session.skipMessageKeysSPQR(0, 10)
 	require.ErrorIs(t, err, ErrMaxSkipExceeded)
 }
 
@@ -671,11 +671,11 @@ func TestInitInitiatorWithInvalidInput(t *testing.T) {
 
 	// Too short shared secret.
 	_, err := InitInitiatorSCKA([]byte{1, 2, 3}, mockSCKA, nil)
-	require.ErrorIs(t, err, ErrInvalidInput)
+	require.ErrorIs(t, err, ErrSharedSecretTooShort)
 
 	// Nil SCKA.
 	_, err = InitInitiatorSCKA(make([]byte, 32), nil, nil)
-	require.ErrorIs(t, err, ErrInvalidInput)
+	require.ErrorIs(t, err, ErrNilProvider)
 }
 
 // TestInitResponderWithInvalidInput tests error handling for invalid input.
@@ -684,11 +684,11 @@ func TestInitResponderWithInvalidInput(t *testing.T) {
 
 	// Too short shared secret.
 	_, err := InitResponderSCKA([]byte{1, 2, 3}, mockSCKA, nil)
-	require.ErrorIs(t, err, ErrInvalidInput)
+	require.ErrorIs(t, err, ErrSharedSecretTooShort)
 
 	// Nil SCKA.
 	_, err = InitResponderSCKA(make([]byte, 32), nil, nil)
-	require.ErrorIs(t, err, ErrInvalidInput)
+	require.ErrorIs(t, err, ErrNilProvider)
 }
 
 // TestSCKAHeader tests SCKAHeader structure.

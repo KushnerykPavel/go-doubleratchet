@@ -12,9 +12,9 @@ var fuzzKey = [32]byte{
 	0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20,
 }
 
-// FuzzHDECRYPT verifies HDECRYPT never panics on arbitrary ciphertext input.
+// FuzzDecryptHeader verifies DecryptHeader never panics on arbitrary ciphertext input.
 // Any input that is not a valid ciphertext must return (nil, false).
-func FuzzHDECRYPT(f *testing.F) {
+func FuzzDecryptHeader(f *testing.F) {
 	// Seed: valid ciphertext so fuzzer can mutate from a known-good baseline.
 	hk := HeaderKey{Key: fuzzKey}
 	for _, hdr := range [][]byte{
@@ -23,7 +23,7 @@ func FuzzHDECRYPT(f *testing.F) {
 		make([]byte, 1),
 		make([]byte, 16),
 	} {
-		ct, err := HENCRYPT(&hk, hdr)
+		ct, err := EncryptHeader(&hk, hdr)
 		if err == nil {
 			f.Add(ct)
 		}
@@ -38,23 +38,23 @@ func FuzzHDECRYPT(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, ciphertext []byte) {
 		// Contract: must never panic. Invalid input must return false.
-		pt, ok := HDECRYPT(fuzzKey, ciphertext)
+		pt, ok := DecryptHeader(fuzzKey, ciphertext)
 		if !ok && pt != nil {
-			t.Fatal("HDECRYPT returned non-nil plaintext on failure")
+			t.Fatal("DecryptHeader returned non-nil plaintext on failure")
 		}
 	})
 }
 
-// FuzzHDECRYPTWrongKey verifies HDECRYPT always rejects ciphertexts encrypted
+// FuzzDecryptHeaderWrongKey verifies DecryptHeader always rejects ciphertexts encrypted
 // with a different key, even when the ciphertext is structurally valid.
-func FuzzHDECRYPTWrongKey(f *testing.F) {
+func FuzzDecryptHeaderWrongKey(f *testing.F) {
 	hk := HeaderKey{Key: fuzzKey}
 	for _, hdr := range [][]byte{
 		{0xDE, 0xAD, 0xBE, 0xEF},
 		make([]byte, 40),
 		{0x00},
 	} {
-		ct, err := HENCRYPT(&hk, hdr)
+		ct, err := EncryptHeader(&hk, hdr)
 		if err == nil {
 			f.Add(ct)
 		}
@@ -65,19 +65,19 @@ func FuzzHDECRYPTWrongKey(f *testing.F) {
 		for i := range wrongKey {
 			wrongKey[i] = 0xFF
 		}
-		pt, ok := HDECRYPT(wrongKey, ciphertext)
+		pt, ok := DecryptHeader(wrongKey, ciphertext)
 		if ok {
-			t.Fatal("HDECRYPT accepted ciphertext under wrong key")
+			t.Fatal("DecryptHeader accepted ciphertext under wrong key")
 		}
 		if pt != nil {
-			t.Fatal("HDECRYPT returned non-nil plaintext on failure")
+			t.Fatal("DecryptHeader returned non-nil plaintext on failure")
 		}
 	})
 }
 
-// FuzzHENCRYPTRoundTrip verifies that arbitrary header bytes survive an
-// HENCRYPT→HDECRYPT round trip without modification.
-func FuzzHENCRYPTRoundTrip(f *testing.F) {
+// FuzzEncryptHeaderRoundTrip verifies that arbitrary header bytes survive an
+// EncryptHeader→DecryptHeader round trip without modification.
+func FuzzEncryptHeaderRoundTrip(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte{0xA1, 0xB2, 0xC3})
 	f.Add(make([]byte, 1))
@@ -88,15 +88,15 @@ func FuzzHENCRYPTRoundTrip(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, header []byte) {
 		hk := HeaderKey{Key: fuzzKey}
-		ct, err := HENCRYPT(&hk, header)
+		ct, err := EncryptHeader(&hk, header)
 		if err != nil {
 			// Only possible error is nonce overflow; unreachable in practice.
-			t.Skipf("HENCRYPT error: %v", err)
+			t.Skipf("EncryptHeader error: %v", err)
 		}
 
-		pt, ok := HDECRYPT(hk.Key, ct)
+		pt, ok := DecryptHeader(hk.Key, ct)
 		if !ok {
-			t.Fatal("HDECRYPT failed on ciphertext produced by HENCRYPT")
+			t.Fatal("DecryptHeader failed on ciphertext produced by EncryptHeader")
 		}
 		if !bytes.Equal(pt, header) {
 			t.Fatalf("round-trip mismatch: got %x, want %x", pt, header)
@@ -104,12 +104,12 @@ func FuzzHENCRYPTRoundTrip(f *testing.F) {
 	})
 }
 
-// FuzzHDECRYPTBitFlip verifies HDECRYPT rejects ciphertexts with single-bit
+// FuzzDecryptHeaderBitFlip verifies DecryptHeader rejects ciphertexts with single-bit
 // corruption anywhere in the message (ciphertext body or tag).
-func FuzzHDECRYPTBitFlip(f *testing.F) {
+func FuzzDecryptHeaderBitFlip(f *testing.F) {
 	// Generate a valid ciphertext as the base for bit-flip mutations.
 	hk := HeaderKey{Key: fuzzKey}
-	ct, err := HENCRYPT(&hk, make([]byte, 40))
+	ct, err := EncryptHeader(&hk, make([]byte, 40))
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -130,6 +130,6 @@ func FuzzHDECRYPTBitFlip(f *testing.F) {
 		// Flipped ciphertext must be rejected (HMAC will catch it)
 		// unless the flip happened to produce a valid MAC — which is negligible.
 		// We only assert no panic here; MAC collision acceptance is not a bug.
-		_, _ = HDECRYPT(fuzzKey, flipped)
+		_, _ = DecryptHeader(fuzzKey, flipped)
 	})
 }

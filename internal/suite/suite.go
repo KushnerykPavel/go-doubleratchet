@@ -11,6 +11,7 @@ import (
 	"errors"
 	"io"
 
+	"github.com/KushnerykPavel/go-doubleratchet/internal/padding"
 	"golang.org/x/crypto/hkdf"
 )
 
@@ -27,10 +28,6 @@ var (
 	errCiphertextShort      = errors.New("ciphertext too short")
 	errCiphertextLenInvalid = errors.New("ciphertext length invalid")
 	errAuthFailed           = errors.New("authentication failed")
-	errEmptyData            = errors.New("empty data")
-	errInvalidBlockSize     = errors.New("invalid block size")
-	errInvalidPadding       = errors.New("invalid padding")
-	errInvalidPaddingVal    = errors.New("invalid padding value")
 )
 
 // Encrypt encrypts plaintext using AES-256-CBC and authenticates with HMAC-SHA256.
@@ -53,7 +50,7 @@ func Encrypt(msgKey, plaintext, ad, info []byte) ([]byte, error) {
 		return nil, err
 	}
 	cbc := cipher.NewCBCEncrypter(block, iv)
-	padded := pkcs7Pad(plaintext, aes.BlockSize)
+	padded := padding.PKCS7Pad(plaintext, aes.BlockSize)
 	ct := make([]byte, len(padded))
 	cbc.CryptBlocks(ct, padded)
 
@@ -113,7 +110,7 @@ func Decrypt(msgKey, ciphertext, ad, info []byte) ([]byte, error) {
 	plaintext := make([]byte, len(ct))
 	cbc.CryptBlocks(plaintext, ct)
 
-	return pkcs7Unpad(plaintext, aes.BlockSize)
+	return padding.PKCS7Unpad(plaintext, aes.BlockSize)
 }
 
 // deriveKeys uses HKDF-SHA256 to derive enc_key, auth_key, and iv from msgKey.
@@ -127,30 +124,3 @@ func deriveKeys(msgKey, info []byte) (encKey, authKey, iv []byte, err error) {
 	return derived[:32], derived[32:64], derived[64:80], nil
 }
 
-func pkcs7Pad(data []byte, blockSize int) []byte {
-	padding := blockSize - (len(data) % blockSize)
-	pad := make([]byte, padding)
-	for i := range pad {
-		pad[i] = byte(padding)
-	}
-	return append(data, pad...)
-}
-
-func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
-	if len(data) == 0 {
-		return nil, errEmptyData
-	}
-	if len(data)%blockSize != 0 {
-		return nil, errInvalidBlockSize
-	}
-	padding := int(data[len(data)-1])
-	if padding == 0 || padding > blockSize {
-		return nil, errInvalidPadding
-	}
-	for i := len(data) - padding; i < len(data); i++ {
-		if data[i] != byte(padding) {
-			return nil, errInvalidPaddingVal
-		}
-	}
-	return data[:len(data)-padding], nil
-}

@@ -2,6 +2,7 @@ package doubleratchet
 
 import (
 	"crypto/sha256"
+	"fmt"
 	"io"
 
 	"golang.org/x/crypto/hkdf"
@@ -34,31 +35,31 @@ type TripleRatchetSession struct {
 // SckaProvider is the post-quantum SCKA implementation.
 func InitInitiatorTripleRatchet(sharedSecret []byte, bobDRPK [32]byte, sckaProvider scka.Provider, cfg *Config) (*TripleRatchetSession, error) {
 	if len(sharedSecret) < 32 {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init initiator triple ratchet: %w", ErrSharedSecretTooShort)
 	}
 	if sckaProvider == nil {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init initiator triple ratchet: %w", ErrNilProvider)
 	}
 	if cfg == nil {
 		cfg = &Config{MaxSkip: DefaultMaxSkip}
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator triple ratchet: %w", err)
 	}
 
 	skec, skscka, err := expandSK(sharedSecret[:32])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator triple ratchet: %w", err)
 	}
 
 	dr, err := InitInitiator(skec, bobDRPK, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator triple ratchet: %w", err)
 	}
 
 	spqr, err := InitInitiatorSCKA(skscka, sckaProvider, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator triple ratchet: %w", err)
 	}
 
 	return &TripleRatchetSession{dr: dr, spqr: spqr, config: cfg}, nil
@@ -71,31 +72,31 @@ func InitInitiatorTripleRatchet(sharedSecret []byte, bobDRPK [32]byte, sckaProvi
 // SckaProvider is the post-quantum SCKA implementation.
 func InitResponderTripleRatchet(sharedSecret []byte, bobKeyPair crypto.KeyPair, sckaProvider scka.Provider, cfg *Config) (*TripleRatchetSession, error) {
 	if len(sharedSecret) < 32 {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init responder triple ratchet: %w", ErrSharedSecretTooShort)
 	}
 	if sckaProvider == nil {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init responder triple ratchet: %w", ErrNilProvider)
 	}
 	if cfg == nil {
 		cfg = &Config{MaxSkip: DefaultMaxSkip}
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder triple ratchet: %w", err)
 	}
 
 	skec, skscka, err := expandSK(sharedSecret[:32])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder triple ratchet: %w", err)
 	}
 
 	dr, err := InitResponder(skec, bobKeyPair, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder triple ratchet: %w", err)
 	}
 
 	spqr, err := InitResponderSCKA(skscka, sckaProvider, cfg)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder triple ratchet: %w", err)
 	}
 
 	return &TripleRatchetSession{dr: dr, spqr: spqr, config: cfg}, nil
@@ -118,14 +119,14 @@ func (s *TripleRatchetSession) Encrypt(plaintext, ad []byte) (TripleRatchetMessa
 	rollback := func() {
 		s.dr.rollback() // zeroes DR's current RK/CKs/recvChains before restoring snapshot
 		// Zero SPQR's current key material before restoring snapshot (§8.1).
-		zeroBytes(s.spqr.rk)
+		crypto.ZeroBytes(s.spqr.rk)
 		for _, pair := range s.spqr.kdfChains {
 			if pair != nil {
 				if pair.Send != nil {
-					zeroBytes(pair.Send.CK)
+					crypto.ZeroBytes(pair.Send.CK)
 				}
 				if pair.Receive != nil {
-					zeroBytes(pair.Receive.CK)
+					crypto.ZeroBytes(pair.Receive.CK)
 				}
 			}
 		}
@@ -137,14 +138,14 @@ func (s *TripleRatchetSession) Encrypt(plaintext, ad []byte) (TripleRatchetMessa
 	}
 
 	// Step 1: derive EC component key and header.
-	ecHeader, ecMK, err := s.dr.RatchetSendKey()
+	ecHeader, ecMK, err := s.dr.ratchetSendKey()
 	if err != nil {
 		rollback()
 		return TripleRatchetMessage{}, err
 	}
 
 	// Step 2: derive PQ component key and SCKA message.
-	sckaMsg, _, pqN, pqMK, err := s.spqr.SendKey()
+	sckaMsg, _, pqN, pqMK, err := s.spqr.sendKey()
 	if err != nil {
 		rollback()
 		return TripleRatchetMessage{}, err
@@ -188,7 +189,7 @@ func (s *TripleRatchetSession) Encrypt(plaintext, ad []byte) (TripleRatchetMessa
 // Both components are rolled back atomically on authentication failure.
 func (s *TripleRatchetSession) Decrypt(msg TripleRatchetMessage, ad []byte) ([]byte, error) {
 	if msg.Header.SCKA == nil {
-		return nil, ErrInvalidInput
+		return nil, ErrNilSCKAHeader
 	}
 
 	// Snapshot both components.
@@ -202,14 +203,14 @@ func (s *TripleRatchetSession) Decrypt(msg TripleRatchetMessage, ad []byte) ([]b
 	rollback := func() {
 		s.dr.rollback() // zeroes DR's current RK/CKs/CKr before restoring snapshot
 		// Zero SPQR's current key material before restoring snapshot (§8.1).
-		zeroBytes(s.spqr.rk)
+		crypto.ZeroBytes(s.spqr.rk)
 		for _, pair := range s.spqr.kdfChains {
 			if pair != nil {
 				if pair.Send != nil {
-					zeroBytes(pair.Send.CK)
+					crypto.ZeroBytes(pair.Send.CK)
 				}
 				if pair.Receive != nil {
-					zeroBytes(pair.Receive.CK)
+					crypto.ZeroBytes(pair.Receive.CK)
 				}
 			}
 		}
@@ -221,14 +222,14 @@ func (s *TripleRatchetSession) Decrypt(msg TripleRatchetMessage, ad []byte) ([]b
 	}
 
 	// Step 1: derive EC component key.
-	ecMK, err := s.dr.RatchetReceiveKey(msg.Header.EC)
+	ecMK, err := s.dr.ratchetReceiveKey(msg.Header.EC)
 	if err != nil {
 		rollback()
 		return nil, err
 	}
 
 	// Step 2: derive PQ component key.
-	_, pqMK, err := s.spqr.ReceiveKey(msg.Header.SCKA)
+	_, pqMK, err := s.spqr.receiveKey(msg.Header.SCKA)
 	if err != nil {
 		rollback()
 		return nil, err

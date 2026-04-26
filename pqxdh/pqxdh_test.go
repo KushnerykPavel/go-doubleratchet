@@ -177,7 +177,7 @@ func TestPQXDH_KEMParamsMismatch_ReturnsError(t *testing.T) {
 	require.NoError(t, err)
 
 	// Bob tries to decapsulate with a MLKEM768 key but the message says MLKEM1024.
-	wrongParamKey := pqxdh.KEMPreKey{Seed: bob.pqspk.Seed, Params: pqxdh.MLKEM768}
+	wrongParamKey := pqxdh.KEMPreKey{EncapsulationKey: bob.pqspk.EncapsulationKey, Seed: bob.pqspk.Seed, Params: pqxdh.MLKEM768}
 	_, err = pqxdh.ReceiveHandshake(bob.ik, &bob.spk, nil, wrongParamKey, &initMsg)
 	require.Error(t, err, "params mismatch must return error")
 }

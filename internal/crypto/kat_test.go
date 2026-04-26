@@ -6,7 +6,7 @@ package crypto
 // golang.org/x/crypto/curve25519 test suite. These prove that SharedSecret
 // and PublicKeyFromPrivate produce the correct curve arithmetic.
 //
-// HENCRYPT/HDECRYPT vectors: frozen regression baseline computed from this
+// EncryptHeader/DecryptHeader vectors: frozen regression baseline computed from this
 // implementation and cross-verified against a standalone Go script. Any change
 // to the cipher suite (KDF labels, padding, MAC construction) will break these
 // tests intentionally.
@@ -81,26 +81,6 @@ func TestSharedSecretKnownAnswer(t *testing.T) {
 	}
 }
 
-func TestDHRatchetKnownAnswer(t *testing.T) {
-	// DHRatchet is an alias for SharedSecret; verify first vector.
-	v := x25519DHVectors[0]
-	scalarBytes := mustHex(v.scalar)
-	pointBytes := mustHex(v.point)
-	want := mustHex(v.result)
-
-	var priv, pub [KeySize]byte
-	copy(priv[:], scalarBytes)
-	copy(pub[:], pointBytes)
-
-	got, err := DHRatchet(priv, pub)
-	if err != nil {
-		t.Fatalf("DHRatchet error: %v", err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Fatalf("DHRatchet mismatch\ngot:  %x\nwant: %x", got, want)
-	}
-}
-
 // ----------------------------------------------------------------------------
 // X25519 — PublicKeyFromPrivate KATs (scalar * basepoint)
 //
@@ -147,7 +127,7 @@ func TestPublicKeyFromPrivateKnownAnswer(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
-// HENCRYPT / HDECRYPT — frozen regression vectors
+// EncryptHeader / DecryptHeader — frozen regression vectors
 //
 // Derived subkeys (for auditing against independent implementations):
 //   key    = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20
@@ -197,7 +177,7 @@ var hencryptKATVectors = []struct { //nolint:govet // test-vector struct; field 
 	},
 }
 
-func TestHENCRYPTKnownAnswer(t *testing.T) {
+func TestEncryptHeaderKnownAnswer(t *testing.T) {
 	for _, v := range hencryptKATVectors {
 		t.Run(v.name, func(t *testing.T) {
 			var header []byte
@@ -207,18 +187,18 @@ func TestHENCRYPTKnownAnswer(t *testing.T) {
 			wantCT := mustHex(v.ct)
 
 			hk := HeaderKey{Key: hencryptKATKey, NonceCounter: v.counter}
-			got, err := HENCRYPT(&hk, header)
+			got, err := EncryptHeader(&hk, header)
 			if err != nil {
-				t.Fatalf("HENCRYPT error: %v", err)
+				t.Fatalf("EncryptHeader error: %v", err)
 			}
 			if !bytes.Equal(got, wantCT) {
-				t.Fatalf("HENCRYPT ciphertext mismatch\ngot:  %x\nwant: %x", got, wantCT)
+				t.Fatalf("EncryptHeader ciphertext mismatch\ngot:  %x\nwant: %x", got, wantCT)
 			}
 		})
 	}
 }
 
-func TestHDECRYPTKnownAnswer(t *testing.T) {
+func TestDecryptHeaderKnownAnswer(t *testing.T) {
 	for _, v := range hencryptKATVectors {
 		t.Run(v.name, func(t *testing.T) {
 			var wantHeader []byte
@@ -229,12 +209,12 @@ func TestHDECRYPTKnownAnswer(t *testing.T) {
 			}
 			ct := mustHex(v.ct)
 
-			got, ok := HDECRYPT(hencryptKATKey, ct)
+			got, ok := DecryptHeader(hencryptKATKey, ct)
 			if !ok {
-				t.Fatal("HDECRYPT failed on KAT ciphertext")
+				t.Fatal("DecryptHeader failed on KAT ciphertext")
 			}
 			if !bytes.Equal(got, wantHeader) {
-				t.Fatalf("HDECRYPT plaintext mismatch\ngot:  %x\nwant: %x", got, wantHeader)
+				t.Fatalf("DecryptHeader plaintext mismatch\ngot:  %x\nwant: %x", got, wantHeader)
 			}
 		})
 	}

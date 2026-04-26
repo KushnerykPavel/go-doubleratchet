@@ -7,6 +7,7 @@ import (
 
 	"golang.org/x/crypto/hkdf"
 
+	"github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
 	"github.com/KushnerykPavel/go-doubleratchet/internal/ecutil"
 )
 
@@ -84,35 +85,35 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("pqxdh: ephemeral key generation: %w", err)
 	}
-	defer zeroBytes(ekPriv[:])
+	defer crypto.ZeroBytes(ekPriv[:])
 
 	// KEM encapsulation against PQ prekey.
 	ct, kemSS, err := kemEncapsulate(bundle.PQPreKey, bundle.PQParams)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("pqxdh: KEM encapsulate: %w", err)
 	}
-	defer zeroBytes(kemSS)
+	defer crypto.ZeroBytes(kemSS)
 
 	// DH1 = DH(IKA_priv, SPKB_pub)
 	dh1, err := ecutil.DHX25519(senderIK.PrivateKey, bundle.SignedPreKey)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("pqxdh: DH1: %w", err)
 	}
-	defer zeroBytes(dh1)
+	defer crypto.ZeroBytes(dh1)
 
 	// DH2 = DH(EKA_priv, IKB_pub)
 	dh2, err := ecutil.DHX25519(ekPriv, bundle.IdentityKey)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("pqxdh: DH2: %w", err)
 	}
-	defer zeroBytes(dh2)
+	defer crypto.ZeroBytes(dh2)
 
 	// DH3 = DH(EKA_priv, SPKB_pub)
 	dh3, err := ecutil.DHX25519(ekPriv, bundle.SignedPreKey)
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, fmt.Errorf("pqxdh: DH3: %w", err)
 	}
-	defer zeroBytes(dh3)
+	defer crypto.ZeroBytes(dh3)
 
 	var dh4 []byte
 	var opkID *uint32
@@ -122,7 +123,7 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 		if err != nil {
 			return HandshakeResult{}, InitialMessage{}, fmt.Errorf("pqxdh: DH4: %w", err)
 		}
-		defer zeroBytes(dh4)
+		defer crypto.ZeroBytes(dh4)
 		opkID = bundle.OPKID
 	}
 
@@ -130,7 +131,7 @@ func SendHandshake(senderIK IdentityKey, bundle *PrekeyBundle) (HandshakeResult,
 	if err != nil {
 		return HandshakeResult{}, InitialMessage{}, err
 	}
-	result.AD = buildAD(senderIK.PublicKey, bundle.IdentityKey)
+	result.AD = buildAD(senderIK.PublicKey, bundle.IdentityKey, bundle.PQPreKey)
 
 	return result, InitialMessage{
 		IdentityKey:   senderIK.PublicKey,
@@ -176,28 +177,28 @@ func ReceiveHandshake(
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("pqxdh: KEM decapsulate: %w", err)
 	}
-	defer zeroBytes(kemSS)
+	defer crypto.ZeroBytes(kemSS)
 
 	// DH1 = DH(SPKB_priv, IKA_pub)
 	dh1, err := ecutil.DHX25519(spk.PrivateKey, msg.IdentityKey)
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("pqxdh: DH1: %w", err)
 	}
-	defer zeroBytes(dh1)
+	defer crypto.ZeroBytes(dh1)
 
 	// DH2 = DH(IKB_priv, EKA_pub)
 	dh2, err := ecutil.DHX25519(receiverIK.PrivateKey, msg.EphemeralKey)
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("pqxdh: DH2: %w", err)
 	}
-	defer zeroBytes(dh2)
+	defer crypto.ZeroBytes(dh2)
 
 	// DH3 = DH(SPKB_priv, EKA_pub)
 	dh3, err := ecutil.DHX25519(spk.PrivateKey, msg.EphemeralKey)
 	if err != nil {
 		return HandshakeResult{}, fmt.Errorf("pqxdh: DH3: %w", err)
 	}
-	defer zeroBytes(dh3)
+	defer crypto.ZeroBytes(dh3)
 
 	var dh4 []byte
 	if msg.OPKID != nil {
@@ -209,14 +210,14 @@ func ReceiveHandshake(
 		if err != nil {
 			return HandshakeResult{}, fmt.Errorf("pqxdh: DH4: %w", err)
 		}
-		defer zeroBytes(dh4)
+		defer crypto.ZeroBytes(dh4)
 	}
 
 	result, err := derivePQXDHSK(dh1, dh2, dh3, dh4, kemSS)
 	if err != nil {
 		return HandshakeResult{}, err
 	}
-	result.AD = buildAD(msg.IdentityKey, receiverIK.PublicKey)
+	result.AD = buildAD(msg.IdentityKey, receiverIK.PublicKey, pqpk.EncapsulationKey)
 
 	return result, nil
 }
@@ -243,7 +244,7 @@ func derivePQXDHSK(dh1, dh2, dh3, dh4, kemSS []byte) (HandshakeResult, error) {
 		km = append(km, dh4...)
 	}
 	km = append(km, kemSS...)
-	defer zeroBytes(km)
+	defer crypto.ZeroBytes(km)
 
 	salt := make([]byte, 32) // all zeros per spec
 	r := hkdf.New(sha256.New, km, salt, []byte(pqxdhInfo))
@@ -260,17 +261,13 @@ func derivePQXDHSK(dh1, dh2, dh3, dh4, kemSS []byte) (HandshakeResult, error) {
 	return result, nil
 }
 
-// buildAD constructs the associated data: IKA_pub ‖ IKB_pub.
-func buildAD(ikaPublic, ikbPublic [32]byte) []byte {
-	ad := make([]byte, 64)
+// buildAD constructs the associated data: IKA_pub ‖ IKB_pub ‖ PQPK.
+// Including the PQ prekey in AD provides stronger binding per PQXDH spec §4.
+func buildAD(ikaPublic, ikbPublic [32]byte, pqPreKey []byte) []byte {
+	ad := make([]byte, 64+len(pqPreKey))
 	copy(ad[:32], ikaPublic[:])
-	copy(ad[32:], ikbPublic[:])
+	copy(ad[32:64], ikbPublic[:])
+	copy(ad[64:], pqPreKey)
 	return ad
 }
 
-// zeroBytes overwrites a byte slice with zeros to scrub sensitive key material.
-func zeroBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
-}

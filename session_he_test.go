@@ -10,7 +10,7 @@ import (
 
 // heSessionNr returns the Nr counter for the active receive chain of s.
 func heSessionNr(s *HESession) uint32 {
-	if c := s.recvChains.Get(s.dhr); c != nil {
+	if c := s.dr.recvChains.Get(s.dr.dhr); c != nil {
 		return c.Nr
 	}
 	return 0
@@ -62,8 +62,8 @@ func TestHEInitiatorResponderInitialization(t *testing.T) {
 	require.Equal(t, sharedHKA, responder.nhkr.Key, "Responder NHKr mismatch")
 
 	// Both should have RK derived from sharedSecret.
-	require.NotEmpty(t, initiator.rk, "Initiator RK should be set")
-	require.NotEmpty(t, responder.rk, "Responder RK should be set")
+	require.NotEmpty(t, initiator.dr.rk, "Initiator RK should be set")
+	require.NotEmpty(t, responder.dr.rk, "Responder RK should be set")
 }
 
 // TestHEInitiatorSendsResponderReceives tests the first message flow:
@@ -108,8 +108,8 @@ func TestHEInitiatorSendsResponderReceives(t *testing.T) {
 	require.EqualValues(t, 1, heSessionNr(responder), "Responder Nr should be 1 after receiving")
 
 	// Verify Responder's DHr is now Initiator's public key.
-	initiatorPubKey, _ := crypto.PublicKeyFromPrivate(initiator.dhs)
-	require.Equal(t, initiatorPubKey, responder.dhr, "Responder DHr should be Initiator's public key after ratchet")
+	initiatorPubKey, _ := crypto.PublicKeyFromPrivate(initiator.dr.dhs)
+	require.Equal(t, initiatorPubKey, responder.dr.dhr, "Responder DHr should be Initiator's public key after ratchet")
 }
 
 // TestHEResponderRepliesInitiatorReceives tests the reply flow after first message.
@@ -153,7 +153,7 @@ func TestHEResponderRepliesInitiatorReceives(t *testing.T) {
 	require.Equal(t, plaintext2, initiatorPlaintext2)
 
 	// After receiving reply, Initiator has performed the recv-side DH ratchet.
-	require.True(t, initiator.dhRatchetPerformed, "dhRatchetPerformed should be true after Initiator processes Responder's reply")
+	require.True(t, initiator.dr.dhRatchetPerformed, "dhRatchetPerformed should be true after Initiator processes Responder's reply")
 }
 
 // TestHESameChainMessages tests same-chain messages use current header keys.
@@ -490,8 +490,8 @@ func TestHESessionCloseZerosKeyMaterial(t *testing.T) {
 
 	initiator.Close()
 
-	require.Equal(t, make([]byte, len(initiator.rk)), initiator.rk, "RK should be zeroed after Close")
-	require.Equal(t, make([]byte, len(initiator.cks)), initiator.cks, "CKs should be zeroed after Close")
+	require.Equal(t, make([]byte, len(initiator.dr.rk)), initiator.dr.rk, "RK should be zeroed after Close")
+	require.Equal(t, make([]byte, len(initiator.dr.cks)), initiator.dr.cks, "CKs should be zeroed after Close")
 	require.Equal(t, make([]byte, 32), initiator.hks.Key[:], "HKs.Key should be zeroed after Close")
 	require.Equal(t, make([]byte, 32), initiator.nhks.Key[:], "NHKs.Key should be zeroed after Close")
 	require.Equal(t, make([]byte, 32), initiator.nhkr.Key[:], "NHKr.Key should be zeroed after Close")
@@ -605,7 +605,7 @@ func TestHEIncomingRatchetKeyValidation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Initiator should have dhRSet=true (DHr=bobPubKey from init).
-	require.True(t, initiator.dhRSet, "Initiator should have dhRSet=true after InitInitiatorHE")
+	require.True(t, initiator.dr.dhRSet, "Initiator should have dhRSet=true after InitInitiatorHE")
 }
 
 // TestHESCKAClose is not directly applicable here (SCKA is SPQR-specific).

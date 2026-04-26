@@ -26,5 +26,3 @@ type KDFChainPair struct {
 	Receive *KDFChain
 }
 
-// MaxSkipLimit is the maximum allowed MaxSkip value to prevent memory abuse.
-const MaxSkipLimit = 100000

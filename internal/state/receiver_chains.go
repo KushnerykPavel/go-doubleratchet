@@ -1,6 +1,10 @@
 package state
 
-import "crypto/subtle"
+import (
+	"crypto/subtle"
+
+	"github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
+)
 
 // ReceiverChainsMax is the maximum number of receiver chains retained.
 // Matches libsignal's MAX_RECEIVER_CHAINS = 5.
@@ -32,7 +36,7 @@ func NewReceiverChains() *ReceiverChains {
 func (r *ReceiverChains) Push(pk [32]byte, ck []byte) {
 	if r.count == ReceiverChainsMax {
 		// Evict oldest: zero its CK then overwrite.
-		zeroSlice(r.chains[r.head].CK)
+		crypto.ZeroBytes(r.chains[r.head].CK)
 		r.chains[r.head] = ReceiverChain{}
 		r.head = (r.head + 1) % ReceiverChainsMax
 		r.count--
@@ -83,7 +87,7 @@ func (r *ReceiverChains) Clone() *ReceiverChains {
 // Clear zeros all CK material and resets the buffer to empty.
 func (r *ReceiverChains) Clear() {
 	for i := range ReceiverChainsMax {
-		zeroSlice(r.chains[i].CK)
+		crypto.ZeroBytes(r.chains[i].CK)
 		r.chains[i] = ReceiverChain{}
 	}
 	r.head = 0

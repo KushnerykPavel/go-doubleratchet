@@ -90,11 +90,12 @@ func (c *Config) identityADPrefix(sending bool) []byte {
 }
 
 // effectiveKDFInfo returns the HKDF info for KDF_RK.
+// Default matches libsignal's "WhisperRatchet" for interoperability.
 func (c *Config) effectiveKDFInfo() []byte {
 	if c != nil && len(c.KDFInfo) > 0 {
 		return c.KDFInfo
 	}
-	return []byte("DoubleRatchet")
+	return []byte("WhisperRatchet")
 }
 
 // effectiveHEKDFInfo returns the HKDF info for KDF_RK_HE.
@@ -106,11 +107,12 @@ func (c *Config) effectiveHEKDFInfo() []byte {
 }
 
 // effectiveEncryptInfo returns the HKDF info for ENCRYPT key expansion.
+// Default matches libsignal's "WhisperMessageKeys" for interoperability.
 func (c *Config) effectiveEncryptInfo() []byte {
 	if c != nil && len(c.EncryptInfo) > 0 {
 		return c.EncryptInfo
 	}
-	return []byte("DoubleRatchetEncrypt")
+	return []byte("WhisperMessageKeys")
 }
 
 // effectiveHybridInfo returns the HKDF info for KDF_HYBRID in the Triple Ratchet.

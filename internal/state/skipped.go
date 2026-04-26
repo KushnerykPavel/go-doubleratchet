@@ -31,9 +31,9 @@ type Storage struct {
 	maxSkip uint32
 }
 
-// HDECRYPTFunc is a function that attempts to decrypt an encrypted header.
-// Per spec §4.2: HDECRYPT takes only (headerKey, ciphertext) — no AD.
-type HDECRYPTFunc func(headerKey [32]byte, ciphertext []byte) ([]byte, bool)
+// DecryptHeaderFunc is a function that attempts to decrypt an encrypted header.
+// Per spec §4.2: DecryptHeader takes only (headerKey, ciphertext) — no AD.
+type DecryptHeaderFunc func(headerKey [32]byte, ciphertext []byte) ([]byte, bool)
 
 // NewStorage creates a new skipped-key storage with the given max skip limit.
 func NewStorage(maxSkip uint32) (*Storage, error) {
@@ -47,20 +47,10 @@ func NewStorage(maxSkip uint32) (*Storage, error) {
 	}, nil
 }
 
-// Lock acquires the storage mutex.
-func (s *Storage) Lock() {
-	s.mu.Lock()
-}
-
-// Unlock releases the storage mutex.
-func (s *Storage) Unlock() {
-	s.mu.Unlock()
-}
-
 // TryAllHeaderKeys iterates through all stored skipped keys and attempts
 // header decryption with each. Returns the message key and true if found.
 // The entry is deleted after successful decryption.
-func (s *Storage) TryAllHeaderKeys(encHeader []byte, decryptFunc HDECRYPTFunc) ([]byte, bool) {
+func (s *Storage) TryAllHeaderKeys(encHeader []byte, decryptFunc DecryptHeaderFunc) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -68,7 +58,7 @@ func (s *Storage) TryAllHeaderKeys(encHeader []byte, decryptFunc HDECRYPTFunc) (
 		var hk [32]byte
 		copy(hk[:], entry.RemoteRatchetPK[:])
 
-		// Try HDECRYPT with this header key.
+		// Try DecryptHeader with this header key.
 		headerBytes, ok := decryptFunc(hk, encHeader)
 		if !ok {
 			continue
@@ -124,12 +114,6 @@ func StorageKey(remotePK [32]byte, messageNumber uint32) string {
 // Store stores a skipped message key. If the storage is at capacity, it evicts
 // the oldest entry. Returns an error if maxSkip would be exceeded after the new entry.
 func (s *Storage) Store(remotePK [32]byte, messageNumber uint32, messageKey [32]byte) error {
-	return s.StoreHK(remotePK, messageNumber, messageKey)
-}
-
-// StoreHK stores a skipped message key indexed by header key.
-// If the storage is at capacity, it evicts the oldest entry.
-func (s *Storage) StoreHK(headerKey [32]byte, messageNumber uint32, messageKey [32]byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -137,7 +121,7 @@ func (s *Storage) StoreHK(headerKey [32]byte, messageNumber uint32, messageKey [
 		return nil // No storage allowed
 	}
 
-	storageKey := StorageKeyHK(headerKey, messageNumber)
+	storageKey := StorageKey(remotePK, messageNumber)
 
 	// If key already exists, don't store (shouldn't happen in practice).
 	if _, exists := s.entries[storageKey]; !exists {
@@ -151,34 +135,22 @@ func (s *Storage) StoreHK(headerKey [32]byte, messageNumber uint32, messageKey [
 			MessageNumber: messageNumber,
 			MessageKey:    messageKey,
 		}
-		copy(entry.RemoteRatchetPK[:], headerKey[:])
+		copy(entry.RemoteRatchetPK[:], remotePK[:])
 		s.entries[storageKey] = entry
 		s.order = append(s.order, storageKey)
 	}
 	return nil
 }
 
-// StorageKeyHK generates a deterministic storage key for a skipped entry using header key.
-func StorageKeyHK(headerKey [32]byte, messageNumber uint32) string {
-	return StorageKey(headerKey, messageNumber)
-}
-
 // Get retrieves and deletes a skipped message key.
 // Returns the key and true if found, or nil and false if not found.
 // The entry is deleted after retrieval (one-time use).
-func (s *Storage) Get(remotePK [32]byte, messageNumber uint32) ([]byte, bool) {
-	return s.GetHK(remotePK, messageNumber)
-}
-
-// GetHK retrieves and deletes a skipped message key using header key index.
-// Returns the key and true if found, or nil and false if not found.
-// The entry is deleted after retrieval (one-time use).
 // The key is zeroed after copying (secure deletion).
-func (s *Storage) GetHK(headerKey [32]byte, messageNumber uint32) ([]byte, bool) {
+func (s *Storage) Get(remotePK [32]byte, messageNumber uint32) ([]byte, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	storageKey := StorageKeyHK(headerKey, messageNumber)
+	storageKey := StorageKey(remotePK, messageNumber)
 	entry, found := s.entries[storageKey]
 	if !found {
 		return nil, false

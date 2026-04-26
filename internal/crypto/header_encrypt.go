@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"math"
+
+	"github.com/KushnerykPavel/go-doubleratchet/internal/padding"
 )
 
 // HeaderKey represents a header encryption key with a per-key nonce counter.
@@ -39,22 +41,15 @@ var ErrInvalidHeaderKey = errors.New("invalid header key")
 // ErrInvalidNonceCounter is returned when the nonce counter would overflow.
 var ErrInvalidNonceCounter = errors.New("invalid nonce counter")
 
-// Sentinel errors for pkcs7Unpad.
-var (
-	errEmptyData         = errors.New("empty data")
-	errInvalidBlockSize  = errors.New("invalid block size")
-	errInvalidPadding    = errors.New("invalid padding")
-	errInvalidPaddingVal = errors.New("invalid padding value")
-)
 
-// HENCRYPT encrypts a header using AES-256-CBC + HMAC-SHA256.
+// EncryptHeader encrypts a header using AES-256-CBC + HMAC-SHA256.
 //
-// Per spec §4.2: HENCRYPT(hk, plaintext) — no associated data parameter.
+// Per spec §4.2: EncryptHeader(hk, plaintext) — no associated data parameter.
 // Hk is the header key with a stateful nonce counter.
 // Header is the plaintext header bytes.
 // Returns encrypted header: nonce (16 bytes) || AES-CBC ciphertext || HMAC tag (32 bytes).
 // Increments hk.NonceCounter after use.
-func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
+func EncryptHeader(hk *HeaderKey, header []byte) ([]byte, error) {
 	if isZeroed(hk.Key[:]) {
 		return nil, ErrInvalidHeaderKey
 	}
@@ -73,11 +68,11 @@ func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
 		return nil, err
 	}
 	cbc := cipher.NewCBCEncrypter(block, nonce)
-	padded := pkcs7Pad(header, aes.BlockSize)
+	padded := padding.PKCS7Pad(header, aes.BlockSize)
 	ct := make([]byte, len(padded))
 	cbc.CryptBlocks(ct, padded)
 
-	// MAC covers nonce || ciphertext only (per spec: no AD in HENCRYPT).
+	// MAC covers nonce || ciphertext only (per spec: no AD in EncryptHeader).
 	h := hmac.New(sha256.New, macKey)
 	h.Write(nonce)
 	h.Write(ct)
@@ -92,13 +87,13 @@ func HENCRYPT(hk *HeaderKey, header []byte) ([]byte, error) {
 	return result, nil
 }
 
-// HDECRYPT decrypts an encrypted header.
+// DecryptHeader decrypts an encrypted header.
 //
-// Per spec §4.2: HDECRYPT(hk, ciphertext) — no associated data parameter.
+// Per spec §4.2: DecryptHeader(hk, ciphertext) — no associated data parameter.
 // Hk is the 32-byte header key.
-// Ciphertext is the encrypted header from HENCRYPT.
+// Ciphertext is the encrypted header from EncryptHeader.
 // Returns (plaintext, true) on success, (nil, false) on failure or zeroed key.
-func HDECRYPT(hk [32]byte, ciphertext []byte) ([]byte, bool) {
+func DecryptHeader(hk [32]byte, ciphertext []byte) ([]byte, bool) {
 	if isZeroed(hk[:]) {
 		return nil, false
 	}
@@ -129,7 +124,7 @@ func HDECRYPT(hk [32]byte, ciphertext []byte) ([]byte, bool) {
 	plaintext := make([]byte, len(ct))
 	cbc.CryptBlocks(plaintext, ct)
 
-	plaintext, err = pkcs7Unpad(plaintext, aes.BlockSize)
+	plaintext, err = padding.PKCS7Unpad(plaintext, aes.BlockSize)
 	if err != nil {
 		return nil, false
 	}
@@ -160,30 +155,3 @@ func isZeroed(b []byte) bool {
 	return true
 }
 
-func pkcs7Pad(data []byte, blockSize int) []byte {
-	padding := blockSize - (len(data) % blockSize)
-	pad := make([]byte, padding)
-	for i := range pad {
-		pad[i] = byte(padding)
-	}
-	return append(data, pad...)
-}
-
-func pkcs7Unpad(data []byte, blockSize int) ([]byte, error) {
-	if len(data) == 0 {
-		return nil, errEmptyData
-	}
-	if len(data)%blockSize != 0 {
-		return nil, errInvalidBlockSize
-	}
-	padding := int(data[len(data)-1])
-	if padding == 0 || padding > blockSize {
-		return nil, errInvalidPadding
-	}
-	for i := len(data) - padding; i < len(data); i++ {
-		if data[i] != byte(padding) {
-			return nil, errInvalidPaddingVal
-		}
-	}
-	return data[:len(data)-padding], nil
-}

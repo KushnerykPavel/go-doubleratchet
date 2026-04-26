@@ -1,9 +1,10 @@
-// Package doubleratchet implements the base Signal Double Ratchet algorithm.
 package doubleratchet
 
 import (
 	"crypto/sha256"
 	"crypto/subtle"
+	"encoding/binary"
+	"fmt"
 	"io"
 
 	"golang.org/x/crypto/hkdf"
@@ -45,36 +46,37 @@ type Session struct {
 // Security note: The ad parameter passed to Encrypt/Decrypt is included verbatim in the
 // HMAC. To bind messages to specific sender/receiver identities and prevent cross-session
 // replay, callers SHOULD include both parties' stable identity public keys in ad.
-// See BindIdentities for a helper. This matches Signal spec §3.3.
+// Set Config.LocalIdentityKey and Config.RemoteIdentityKey to bind messages to identity keys.
+// This matches Signal spec §3.3.
 func InitInitiator(sharedSecret []byte, bobRatchetPK [32]byte, cfg *Config) (*Session, error) {
 	if len(sharedSecret) < 32 {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init initiator: %w", ErrSharedSecretTooShort)
 	}
 	if cfg == nil {
 		cfg = &Config{MaxSkip: DefaultMaxSkip}
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator: %w", err)
 	}
 
 	dhsPriv, _, err := crypto.GenerateKeyPair()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator: %w", err)
 	}
 
 	dhOut, err := crypto.SharedSecret(dhsPriv, bobRatchetPK)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator: %w", err)
 	}
 
 	rk, cks, err := deriveRootAndChain(dhOut, sharedSecret[:32], cfg.effectiveKDFInfo())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator: %w", err)
 	}
 
 	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator: %w", err)
 	}
 
 	return &Session{
@@ -99,26 +101,27 @@ func InitInitiator(sharedSecret []byte, bobRatchetPK [32]byte, cfg *Config) (*Se
 // Security note: The ad parameter passed to Encrypt/Decrypt is included verbatim in the
 // HMAC. To bind messages to specific sender/receiver identities and prevent cross-session
 // replay, callers SHOULD include both parties' stable identity public keys in ad.
-// See BindIdentities for a helper. This matches Signal spec §3.3.
+// Set Config.LocalIdentityKey and Config.RemoteIdentityKey to bind messages to identity keys.
+// This matches Signal spec §3.3.
 func InitResponder(sharedSecret []byte, bobKeyPair crypto.KeyPair, cfg *Config) (*Session, error) {
 	if len(sharedSecret) < 32 {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init responder: %w", ErrSharedSecretTooShort)
 	}
 	if cfg == nil {
 		cfg = &Config{MaxSkip: DefaultMaxSkip}
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder: %w", err)
 	}
 	if !crypto.VerifyPublicKey(bobKeyPair.PublicKey) {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init responder: %w", ErrInvalidInput)
 	}
 
 	rk := append([]byte(nil), sharedSecret[:32]...)
 
 	sk, err := state.NewStorage(cfg.EffectiveMaxSkip())
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder: %w", err)
 	}
 
 	return &Session{
@@ -166,7 +169,7 @@ func (s *Session) Encrypt(plaintext, ad []byte) (Message, error) {
 	// Advance chain state before encryption (spec §3: cks, mk = KDF_CK(cks) then ns++).
 	// If a subsequent step fails, state is advanced without producing a message;
 	// callers must treat Encrypt errors as fatal and not retry with different plaintext.
-	zeroBytes(s.cks)
+	crypto.ZeroBytes(s.cks)
 	s.cks = newCKs
 	n := s.ns
 	s.ns++
@@ -272,10 +275,10 @@ func (s *Session) Decrypt(msg Message, ad []byte) ([]byte, error) {
 	return pt, nil
 }
 
-// RatchetSendKey derives the next EC message key without encrypting.
+// ratchetSendKey derives the next EC message key without encrypting.
 // Used by TripleRatchetSession to obtain the EC component key before combining
 // with the PQ key via KDF_HYBRID.
-func (s *Session) RatchetSendKey() (Header, []byte, error) {
+func (s *Session) ratchetSendKey() (Header, []byte, error) {
 	if s.dhRatchetPerformed {
 		if err := s.performDHRatchetSend(); err != nil {
 			return Header{}, nil, err
@@ -295,7 +298,7 @@ func (s *Session) RatchetSendKey() (Header, []byte, error) {
 		return Header{}, nil, err
 	}
 
-	zeroBytes(s.cks)
+	crypto.ZeroBytes(s.cks)
 	s.cks = newCKs
 	n := s.ns
 	s.ns++
@@ -313,9 +316,9 @@ func (s *Session) RatchetSendKey() (Header, []byte, error) {
 	return header, msgKey, nil
 }
 
-// RatchetReceiveKey processes an incoming EC header and returns the 32-byte message key.
+// ratchetReceiveKey processes an incoming EC header and returns the 32-byte message key.
 // Used by TripleRatchetSession to obtain the EC component key.
-func (s *Session) RatchetReceiveKey(header Header) ([]byte, error) {
+func (s *Session) ratchetReceiveKey(header Header) ([]byte, error) {
 	// Try skipped keys first.
 	if msgKey, found := s.mkSkipped.Get(header.RatchetPublicKey, header.N); found {
 		return msgKey, nil
@@ -357,8 +360,8 @@ func (s *Session) RatchetReceiveKey(header Header) ([]byte, error) {
 // Close zeros all key material in the session, rendering it unusable.
 // Callers must not use the session after Close returns.
 func (s *Session) Close() error {
-	zeroBytes(s.rk)
-	zeroBytes(s.cks)
+	crypto.ZeroBytes(s.rk)
+	crypto.ZeroBytes(s.cks)
 	for i := range s.dhs {
 		s.dhs[i] = 0
 	}
@@ -378,8 +381,8 @@ func (s *Session) Close() error {
 	return nil
 }
 
-// GetConfig returns the session configuration.
-func (s *Session) GetConfig() *Config {
+// Config returns the session configuration.
+func (s *Session) Config() *Config {
 	return s.config
 }
 
@@ -403,9 +406,9 @@ func (s *Session) performDHRatchetSend() error {
 	}
 
 	// Zero superseded key material before replacing (§8.1 secure deletion).
-	zeroBytes(s.rk)
+	crypto.ZeroBytes(s.rk)
 	s.rk = rk
-	zeroBytes(s.cks)
+	crypto.ZeroBytes(s.cks)
 	s.cks = cks
 	for i := range s.dhs {
 		s.dhs[i] = 0
@@ -438,57 +441,57 @@ func (s *Session) performDHRatchetRecv(header Header) error {
 
 	dhOut, err := crypto.SharedSecret(s.dhs, header.RatchetPublicKey)
 	if err != nil {
-		zeroBytes(prevCKr)
+		crypto.ZeroBytes(prevCKr)
 		return err
 	}
 
 	newRK, ckr, err := deriveRootAndChain(dhOut, s.rk, s.config.effectiveKDFInfo())
 	if err != nil {
-		zeroBytes(prevCKr)
+		crypto.ZeroBytes(prevCKr)
 		return err
 	}
 
 	// Zero superseded root key before replacing (§8.1 secure deletion).
-	zeroBytes(s.rk)
+	crypto.ZeroBytes(s.rk)
 	s.rk = newRK
 
 	// Store skipped keys from the previous chain (messages between prevNr and header.PN).
 	if header.PN > prevNr && prevCKr != nil {
 		if header.PN-prevNr > s.config.EffectiveMaxSkip() {
-			zeroBytes(prevCKr)
+			crypto.ZeroBytes(prevCKr)
 			return ErrMaxSkipExceeded
 		}
 		tmpCKr := append([]byte(nil), prevCKr...)
 		for n := prevNr; n < header.PN; n++ {
 			msgKey, err := kdf.DeriveMessageKey(tmpCKr)
 			if err != nil {
-				zeroBytes(tmpCKr)
-				zeroBytes(prevCKr)
+				crypto.ZeroBytes(tmpCKr)
+				crypto.ZeroBytes(prevCKr)
 				return err
 			}
 			var mk [32]byte
 			copy(mk[:], msgKey)
 			if err := s.mkSkipped.Store(prevDHr, n, mk); err != nil {
-				zeroBytes(tmpCKr)
-				zeroBytes(prevCKr)
+				crypto.ZeroBytes(tmpCKr)
+				crypto.ZeroBytes(prevCKr)
 				return err
 			}
-			newTmpCKr, _, err := kdf.ChainKDFDerive(tmpCKr)
+			newTmpCKr, _, err := kdf.DeriveNextChainKey(tmpCKr)
 			if err != nil {
-				zeroBytes(tmpCKr)
-				zeroBytes(prevCKr)
+				crypto.ZeroBytes(tmpCKr)
+				crypto.ZeroBytes(prevCKr)
 				return err
 			}
-			zeroBytes(tmpCKr)
+			crypto.ZeroBytes(tmpCKr)
 			tmpCKr = newTmpCKr
 		}
-		zeroBytes(tmpCKr)
+		crypto.ZeroBytes(tmpCKr)
 	}
-	zeroBytes(prevCKr)
+	crypto.ZeroBytes(prevCKr)
 
 	// Push the new receive chain (may evict the oldest if at capacity).
 	s.recvChains.Push(header.RatchetPublicKey, ckr)
-	zeroBytes(ckr)
+	crypto.ZeroBytes(ckr)
 
 	s.dhr = header.RatchetPublicKey
 	s.dhRSet = true
@@ -512,12 +515,12 @@ func (s *Session) skipMessageKeys(recvPK [32]byte, chain *state.ReceiverChain, u
 			return err
 		}
 
-		newCKr, _, err := kdf.ChainKDFDerive(chain.CK)
+		newCKr, _, err := kdf.DeriveNextChainKey(chain.CK)
 		if err != nil {
 			return err
 		}
 		// Zero superseded chain key before replacing (§8.1 secure deletion).
-		zeroBytes(chain.CK)
+		crypto.ZeroBytes(chain.CK)
 		chain.CK = newCKr
 		chain.Nr++
 	}
@@ -542,33 +545,33 @@ func (s *Session) deriveRecvMessageKey(recvPK [32]byte, chain *state.ReceiverCha
 			var err error
 			msgKey, err = kdf.DeriveMessageKey(ckr)
 			if err != nil {
-				zeroBytes(ckr)
+				crypto.ZeroBytes(ckr)
 				return nil, err
 			}
 		} else {
-			newCkr, _, err := kdf.ChainKDFDerive(ckr)
+			newCkr, _, err := kdf.DeriveNextChainKey(ckr)
 			if err != nil {
-				zeroBytes(ckr)
+				crypto.ZeroBytes(ckr)
 				return nil, err
 			}
-			zeroBytes(ckr)
+			crypto.ZeroBytes(ckr)
 			ckr = newCkr
 		}
 	}
 
 	if msgKey == nil {
-		zeroBytes(ckr)
+		crypto.ZeroBytes(ckr)
 		return nil, ErrInvalidTransition
 	}
 
-	newCKr, _, err := kdf.ChainKDFDerive(ckr)
+	newCKr, _, err := kdf.DeriveNextChainKey(ckr)
 	if err != nil {
-		zeroBytes(ckr)
+		crypto.ZeroBytes(ckr)
 		return nil, err
 	}
-	zeroBytes(ckr)
+	crypto.ZeroBytes(ckr)
 	// Zero superseded chain key before replacing (§8.1 secure deletion).
-	zeroBytes(chain.CK)
+	crypto.ZeroBytes(chain.CK)
 	chain.CK = newCKr
 
 	return msgKey, nil
@@ -578,8 +581,8 @@ func (s *Session) deriveRecvMessageKey(recvPK [32]byte, chain *state.ReceiverCha
 func (s *Session) rollback() {
 	prev := s.invariants.GetPrevState()
 	// Zero current (partially-mutated) slice allocations before restoring the snapshot.
-	zeroBytes(s.rk)
-	zeroBytes(s.cks)
+	crypto.ZeroBytes(s.rk)
+	crypto.ZeroBytes(s.cks)
 	if s.recvChains != nil {
 		s.recvChains.Clear()
 	}
@@ -617,7 +620,7 @@ func deriveMessageKey(chainKey []byte) ([]byte, error) {
 }
 
 func advanceChainKey(chainKey []byte) ([]byte, error) {
-	newCK, _, err := kdf.ChainKDFDerive(chainKey)
+	newCK, _, err := kdf.DeriveNextChainKey(chainKey)
 	return newCK, err
 }
 
@@ -640,24 +643,12 @@ func (s *Session) buildAD(header, ad []byte, sending bool) []byte {
 func encodeHeader(h Header) []byte {
 	buf := make([]byte, 32+4+4)
 	copy(buf[:32], h.RatchetPublicKey[:])
-	putUint32BE(buf[32:], h.PN)
-	putUint32BE(buf[32+4:], h.N)
+	binary.BigEndian.PutUint32(buf[32:], h.PN)
+	binary.BigEndian.PutUint32(buf[36:], h.N)
 	return buf
-}
-
-func putUint32BE(b []byte, v uint32) {
-	b[0] = byte(v >> 24)
-	b[1] = byte(v >> 16)
-	b[2] = byte(v >> 8)
-	b[3] = byte(v)
 }
 
 func bytesEqual(a, b []byte) bool {
 	return subtle.ConstantTimeCompare(a, b) == 1
 }
 
-func zeroBytes(b []byte) {
-	for i := range b {
-		b[i] = 0
-	}
-}

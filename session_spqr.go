@@ -1,6 +1,10 @@
 package doubleratchet
 
 import (
+	"encoding/binary"
+	"fmt"
+
+	"github.com/KushnerykPavel/go-doubleratchet/internal/crypto"
 	"github.com/KushnerykPavel/go-doubleratchet/internal/kdf"
 	"github.com/KushnerykPavel/go-doubleratchet/internal/state"
 	"github.com/KushnerykPavel/go-doubleratchet/internal/suite"
@@ -27,19 +31,19 @@ type SPQRSession struct {
 // InitInitiatorSCKA initializes a SPQR session for the Initiator.
 func InitInitiatorSCKA(sk []byte, sckaProvider scka.Provider, cfg *Config) (*SPQRSession, error) {
 	if len(sk) < SharedSecretSize {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init initiator SCKA: %w", ErrSharedSecretTooShort)
 	}
 	if sckaProvider == nil {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init initiator SCKA: %w", ErrNilProvider)
 	}
 
 	if err := sckaProvider.InitInitiator(sk); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator SCKA: %w", err)
 	}
 
-	rk, cks, ckr, err := kdf.SCKAInit(sk)
+	rk, cks, ckr, err := kdf.DeriveInitialChainsSPQR(sk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init initiator SCKA: %w", err)
 	}
 
 	if cfg == nil {
@@ -68,20 +72,20 @@ func InitInitiatorSCKA(sk []byte, sckaProvider scka.Provider, cfg *Config) (*SPQ
 // InitResponderSCKA initializes a SPQR session for the Responder.
 func InitResponderSCKA(sk []byte, sckaProvider scka.Provider, cfg *Config) (*SPQRSession, error) {
 	if len(sk) < SharedSecretSize {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init responder SCKA: %w", ErrSharedSecretTooShort)
 	}
 	if sckaProvider == nil {
-		return nil, ErrInvalidInput
+		return nil, fmt.Errorf("doubleratchet: init responder SCKA: %w", ErrNilProvider)
 	}
 
 	if err := sckaProvider.InitResponder(sk); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder SCKA: %w", err)
 	}
 
 	// Responder swaps CKs/CKr so Initiator's send chain matches Responder's receive chain.
-	rk, ckr, cks, err := kdf.SCKAInit(sk)
+	rk, ckr, cks, err := kdf.DeriveInitialChainsSPQR(sk)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("doubleratchet: init responder SCKA: %w", err)
 	}
 
 	if cfg == nil {
@@ -110,19 +114,19 @@ func InitResponderSCKA(sk []byte, sckaProvider scka.Provider, cfg *Config) (*SPQ
 // Close zeros all key material in the SPQR session and closes the SCKA provider.
 // Callers must not use the session after Close returns.
 func (s *SPQRSession) Close() error {
-	zeroBytes(s.rk)
+	crypto.ZeroBytes(s.rk)
 	for epoch, pair := range s.kdfChains {
 		if pair.Send != nil {
-			zeroBytes(pair.Send.CK)
+			crypto.ZeroBytes(pair.Send.CK)
 		}
 		if pair.Receive != nil {
-			zeroBytes(pair.Receive.CK)
+			crypto.ZeroBytes(pair.Receive.CK)
 		}
 		delete(s.kdfChains, epoch)
 	}
 	for epoch, keys := range s.mkSkipped {
 		for n, mk := range keys {
-			zeroBytes(mk)
+			crypto.ZeroBytes(mk)
 			delete(keys, n)
 		}
 		delete(s.mkSkipped, epoch)
@@ -133,9 +137,9 @@ func (s *SPQRSession) Close() error {
 	return nil
 }
 
-// SendKey derives the next message key for sending.
+// sendKey derives the next message key for sending.
 // Message numbers are 0-indexed: first message has N=0.
-func (s *SPQRSession) SendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, err error) {
+func (s *SPQRSession) sendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, err error) {
 	msg, sendingEpoch, outputKey, keyEpoch, err := s.scka.Send()
 	if err != nil {
 		return nil, 0, 0, nil, err
@@ -146,7 +150,7 @@ func (s *SPQRSession) SendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, 
 			return nil, 0, 0, nil, ErrEpochMismatch
 		}
 
-		newRK, cks, ckr, err := kdf.SCKARatchetRK(s.rk, outputKey)
+		newRK, cks, ckr, err := kdf.RatchetRootKeySPQR(s.rk, outputKey)
 		if err != nil {
 			return nil, 0, 0, nil, err
 		}
@@ -161,13 +165,13 @@ func (s *SPQRSession) SendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, 
 			Receive: &state.KDFChain{CK: ckr, N: 0},
 		}
 		s.epoch = keyEpoch
-		s.ClearOldEpochs(sendingEpoch)
+		s.clearOldEpochs(sendingEpoch)
 	}
 
 	// Clear send chain of the epoch before sendingEpoch (forward secrecy).
 	if sendingEpoch > 0 {
 		if pair, ok := s.kdfChains[sendingEpoch-1]; ok && pair != nil && pair.Send != nil {
-			zeroBytes(pair.Send.CK)
+			crypto.ZeroBytes(pair.Send.CK)
 			pair.Send = nil
 		}
 	}
@@ -179,7 +183,7 @@ func (s *SPQRSession) SendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, 
 
 	// 0-indexed: current N is the message number, then advance.
 	n = chain.Send.N
-	chain.Send.CK, mk, err = kdf.SCKARatchetCK(chain.Send.CK, n)
+	chain.Send.CK, mk, err = kdf.RatchetChainKeySPQR(chain.Send.CK, n)
 	if err != nil {
 		return nil, 0, 0, nil, err
 	}
@@ -190,7 +194,7 @@ func (s *SPQRSession) SendKey() (msg []byte, sendingEpoch, n uint32, mk []byte, 
 
 // Encrypt encrypts a plaintext message using the SPQR.
 func (s *SPQRSession) Encrypt(plaintext, ad []byte) (header *SCKAHeader, ciphertext []byte, err error) {
-	msg, _, n, mk, err := s.SendKey()
+	msg, _, n, mk, err := s.sendKey()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -205,9 +209,9 @@ func (s *SPQRSession) Encrypt(plaintext, ad []byte) (header *SCKAHeader, ciphert
 	return header, ciphertext, nil
 }
 
-// ReceiveKey processes a header and returns the message key.
+// receiveKey processes a header and returns the message key.
 // Message numbers are 0-indexed: first message has N=0.
-func (s *SPQRSession) ReceiveKey(header *SCKAHeader) (receivingEpoch uint32, mk []byte, err error) {
+func (s *SPQRSession) receiveKey(header *SCKAHeader) (receivingEpoch uint32, mk []byte, err error) {
 	receivingEpoch, outputKey, keyEpoch, err := s.scka.Receive(header.Msg)
 	if err != nil {
 		return 0, nil, err
@@ -218,7 +222,7 @@ func (s *SPQRSession) ReceiveKey(header *SCKAHeader) (receivingEpoch uint32, mk 
 			return 0, nil, ErrEpochMismatch
 		}
 
-		newRK, cks, ckr, err := kdf.SCKARatchetRK(s.rk, outputKey)
+		newRK, cks, ckr, err := kdf.RatchetRootKeySPQR(s.rk, outputKey)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -233,15 +237,15 @@ func (s *SPQRSession) ReceiveKey(header *SCKAHeader) (receivingEpoch uint32, mk 
 			Receive: &state.KDFChain{CK: ckr, N: 0},
 		}
 		s.epoch = keyEpoch
-		s.ClearOldEpochs(receivingEpoch)
+		s.clearOldEpochs(receivingEpoch)
 	}
 
-	mk = s.TrySkippedMessageKeys(receivingEpoch, header.N)
+	mk = s.trySkippedMessageKeys(receivingEpoch, header.N)
 	if mk != nil {
 		return receivingEpoch, mk, nil
 	}
 
-	if err := s.SkipMessageKeys(receivingEpoch, header.N); err != nil {
+	if err := s.skipMessageKeysSPQR(receivingEpoch, header.N); err != nil {
 		return 0, nil, err
 	}
 
@@ -255,7 +259,7 @@ func (s *SPQRSession) ReceiveKey(header *SCKAHeader) (receivingEpoch uint32, mk 
 		return 0, nil, ErrSkippedKeyNotFound
 	}
 
-	chain.Receive.CK, mk, err = kdf.SCKARatchetCK(chain.Receive.CK, nextN)
+	chain.Receive.CK, mk, err = kdf.RatchetChainKeySPQR(chain.Receive.CK, nextN)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -275,7 +279,7 @@ func (s *SPQRSession) Decrypt(header *SCKAHeader, ciphertext, ad []byte) ([]byte
 	skippedSnap := s.cloneSkipped()
 	sckaSnap := s.scka.Snapshot()
 
-	_, mk, err := s.ReceiveKey(header)
+	_, mk, err := s.receiveKey(header)
 	if err != nil {
 		return nil, err
 	}
@@ -283,14 +287,14 @@ func (s *SPQRSession) Decrypt(header *SCKAHeader, ciphertext, ad []byte) ([]byte
 	pt, err := decryptMessageSPQR(s.config, mk, ciphertext, header, ad, s.config.effectiveEncryptInfo())
 	if err != nil {
 		// Auth failed — zero intermediate key material before restoring snapshot (§8.1).
-		zeroBytes(s.rk)
+		crypto.ZeroBytes(s.rk)
 		for _, pair := range s.kdfChains {
 			if pair != nil {
 				if pair.Send != nil {
-					zeroBytes(pair.Send.CK)
+					crypto.ZeroBytes(pair.Send.CK)
 				}
 				if pair.Receive != nil {
-					zeroBytes(pair.Receive.CK)
+					crypto.ZeroBytes(pair.Receive.CK)
 				}
 			}
 		}
@@ -305,8 +309,8 @@ func (s *SPQRSession) Decrypt(header *SCKAHeader, ciphertext, ad []byte) ([]byte
 	return pt, nil
 }
 
-// TrySkippedMessageKeys retrieves and deletes a skipped message key.
-func (s *SPQRSession) TrySkippedMessageKeys(epoch, n uint32) []byte {
+// trySkippedMessageKeys retrieves and deletes a skipped message key.
+func (s *SPQRSession) trySkippedMessageKeys(epoch, n uint32) []byte {
 	epochKeys, ok := s.mkSkipped[epoch]
 	if !ok {
 		return nil
@@ -331,8 +335,8 @@ func (s *SPQRSession) TrySkippedMessageKeys(epoch, n uint32) []byte {
 	return mkCopy
 }
 
-// SkipMessageKeys stores skipped message keys from the current position up to (but not including) until.
-func (s *SPQRSession) SkipMessageKeys(epoch, until uint32) error {
+// skipMessageKeysSPQR stores skipped message keys from the current position up to (but not including) until.
+func (s *SPQRSession) skipMessageKeysSPQR(epoch, until uint32) error {
 	chain, ok := s.kdfChains[epoch]
 	if !ok || chain == nil || chain.Receive == nil {
 		return nil
@@ -345,7 +349,7 @@ func (s *SPQRSession) SkipMessageKeys(epoch, until uint32) error {
 
 	for chain.Receive.N < until {
 		n := chain.Receive.N
-		nextCK, mk, err := kdf.SCKARatchetCK(chain.Receive.CK, n)
+		nextCK, mk, err := kdf.RatchetChainKeySPQR(chain.Receive.CK, n)
 		if err != nil {
 			return err
 		}
@@ -363,8 +367,8 @@ func (s *SPQRSession) SkipMessageKeys(epoch, until uint32) error {
 	return nil
 }
 
-// ClearOldEpochs removes epoch state older than sendingEpoch-1.
-func (s *SPQRSession) ClearOldEpochs(sendingEpoch uint32) {
+// clearOldEpochs removes epoch state older than sendingEpoch-1.
+func (s *SPQRSession) clearOldEpochs(sendingEpoch uint32) {
 	if sendingEpoch <= 1 {
 		return
 	}
@@ -376,10 +380,10 @@ func (s *SPQRSession) ClearOldEpochs(sendingEpoch uint32) {
 			pair := s.kdfChains[epoch]
 			if pair != nil {
 				if pair.Send != nil {
-					zeroBytes(pair.Send.CK)
+					crypto.ZeroBytes(pair.Send.CK)
 				}
 				if pair.Receive != nil {
-					zeroBytes(pair.Receive.CK)
+					crypto.ZeroBytes(pair.Receive.CK)
 				}
 			}
 			delete(s.kdfChains, epoch)
@@ -388,7 +392,7 @@ func (s *SPQRSession) ClearOldEpochs(sendingEpoch uint32) {
 	for epoch := range s.mkSkipped {
 		if epoch < keepFrom {
 			for _, mk := range s.mkSkipped[epoch] {
-				zeroBytes(mk)
+				crypto.ZeroBytes(mk)
 			}
 			delete(s.mkSkipped, epoch)
 		}
@@ -454,19 +458,13 @@ func decryptMessageSPQR(cfg *Config, key, ciphertext []byte, header *SCKAHeader,
 
 func encodeSCKAHeader(h *SCKAHeader) ([]byte, error) {
 	if h == nil {
-		return nil, ErrInvalidInput
+		return nil, ErrNilSCKAHeader
 	}
 	msgLen := len(h.Msg)
 	size := 4 + msgLen + 4
 	buf := make([]byte, size)
-	buf[0] = byte(msgLen >> 24)
-	buf[1] = byte(msgLen >> 16)
-	buf[2] = byte(msgLen >> 8)
-	buf[3] = byte(msgLen)
+	binary.BigEndian.PutUint32(buf[:4], uint32(msgLen))
 	copy(buf[4:], h.Msg)
-	buf[size-4] = byte(h.N >> 24)
-	buf[size-3] = byte(h.N >> 16)
-	buf[size-2] = byte(h.N >> 8)
-	buf[size-1] = byte(h.N)
+	binary.BigEndian.PutUint32(buf[size-4:], h.N)
 	return buf, nil
 }

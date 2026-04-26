@@ -81,12 +81,6 @@ func SharedSecret(privateKey, publicKey [KeySize]byte) ([]byte, error) {
 	return ss, nil
 }
 
-// DHRatchet performs a DH ratchet step using the local private key and remote public key.
-// Returns the new shared secret.
-func DHRatchet(localPrivate, remotePublic [KeySize]byte) ([]byte, error) {
-	return SharedSecret(localPrivate, remotePublic)
-}
-
 // PublicKeyFromPrivate extracts the public key from a private key.
 // For X25519, the public key is derived from the private key.
 func PublicKeyFromPrivate(privateKey [KeySize]byte) ([KeySize]byte, error) {
