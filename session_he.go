@@ -265,7 +265,7 @@ func (s *HESession) EncryptHE(plaintext, ad []byte) (EncryptedHeader, Message, e
 // DecryptHE decrypts a message with an encrypted header.
 // Rolls back all state (including header keys) on authentication failure.
 func (s *HESession) DecryptHE(encHeader EncryptedHeader, msg Message, ad []byte) ([]byte, error) {
-	s.dr.invariants.Record(s.dr.ns, s.dr.pn, s.dr.rk, s.dr.dhs, s.dr.dhr, s.dr.cks, s.dr.recvChains, s.dr.mkSkipped, s.dr.dhRSet)
+	s.dr.invariants.Record(s.dr.ns, s.dr.pn, s.dr.rk, s.dr.dhs, s.dr.dhr, s.dr.cks, s.dr.recvChains, s.dr.mkSkipped, s.dr.dhRSet, s.dr.dhRatchetPerformed)
 	hksSnap := s.hks
 	hkrSnap := s.hkr
 	nhksSnap := s.nhks

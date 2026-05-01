@@ -109,7 +109,7 @@ func InitResponderTripleRatchet(sharedSecret []byte, bobKeyPair crypto.KeyPair, 
 // if any step fails.
 func (s *TripleRatchetSession) Encrypt(plaintext, ad []byte) (TripleRatchetMessage, error) {
 	// Snapshot both components before any state mutation.
-	s.dr.invariants.Record(s.dr.ns, s.dr.pn, s.dr.rk, s.dr.dhs, s.dr.dhr, s.dr.cks, s.dr.recvChains, s.dr.mkSkipped, s.dr.dhRSet)
+	s.dr.invariants.Record(s.dr.ns, s.dr.pn, s.dr.rk, s.dr.dhs, s.dr.dhr, s.dr.cks, s.dr.recvChains, s.dr.mkSkipped, s.dr.dhRSet, s.dr.dhRatchetPerformed)
 	rkSnap := append([]byte(nil), s.spqr.rk...)
 	epochSnap := s.spqr.epoch
 	chainsSnap := s.spqr.cloneChains()
@@ -193,7 +193,7 @@ func (s *TripleRatchetSession) Decrypt(msg TripleRatchetMessage, ad []byte) ([]b
 	}
 
 	// Snapshot both components.
-	s.dr.invariants.Record(s.dr.ns, s.dr.pn, s.dr.rk, s.dr.dhs, s.dr.dhr, s.dr.cks, s.dr.recvChains, s.dr.mkSkipped, s.dr.dhRSet)
+	s.dr.invariants.Record(s.dr.ns, s.dr.pn, s.dr.rk, s.dr.dhs, s.dr.dhr, s.dr.cks, s.dr.recvChains, s.dr.mkSkipped, s.dr.dhRSet, s.dr.dhRatchetPerformed)
 	rkSnap := append([]byte(nil), s.spqr.rk...)
 	epochSnap := s.spqr.epoch
 	chainsSnap := s.spqr.cloneChains()

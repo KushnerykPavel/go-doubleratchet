@@ -12,15 +12,16 @@ var ErrInvariantViolation = errors.New("invariant violation")
 
 // Invariants tracks previous session state for rollback on authentication failure.
 type Invariants struct {
-	prevMKSKIPPED  *Storage
-	prevRecvChains *ReceiverChains
-	prevRK         []byte
-	prevCKs        []byte
-	prevNs         uint32
-	prevPN         uint32
-	prevDHs        [32]byte
-	prevDHr        [32]byte
-	prevDhRSet     bool
+	prevMKSKIPPED          *Storage
+	prevRecvChains         *ReceiverChains
+	prevRK                 []byte
+	prevCKs                []byte
+	prevNs                 uint32
+	prevPN                 uint32
+	prevDHs                [32]byte
+	prevDHr                [32]byte
+	prevDhRSet             bool
+	prevDHRatchetPerformed bool
 }
 
 // NewInvariants creates an Invariants tracker for a session.
@@ -30,7 +31,7 @@ func NewInvariants() *Invariants {
 
 // Record snapshots the current state before a potential state change.
 // Must be called before any mutation that Decrypt may need to roll back.
-func (inv *Invariants) Record(ns, pn uint32, rk []byte, dhs, dhr [32]byte, cks []byte, recvChains *ReceiverChains, mkskipped *Storage, dhRSet bool) {
+func (inv *Invariants) Record(ns, pn uint32, rk []byte, dhs, dhr [32]byte, cks []byte, recvChains *ReceiverChains, mkskipped *Storage, dhRSet bool, dhRatchetPerformed bool) {
 	inv.prevNs = ns
 	inv.prevPN = pn
 	inv.prevRK = copyBytes(rk)
@@ -40,33 +41,36 @@ func (inv *Invariants) Record(ns, pn uint32, rk []byte, dhs, dhr [32]byte, cks [
 	inv.prevRecvChains = recvChains.Clone()
 	inv.prevMKSKIPPED = mkskipped.Clone()
 	inv.prevDhRSet = dhRSet
+	inv.prevDHRatchetPerformed = dhRatchetPerformed
 }
 
 // PrevState holds the previous state values for rollback.
 type PrevState struct {
-	MKSKIPPED  *Storage
-	RecvChains *ReceiverChains
-	RK         []byte
-	CKs        []byte
-	Ns         uint32
-	PN         uint32
-	DHs        [32]byte
-	DHr        [32]byte
-	DhRSet     bool
+	MKSKIPPED          *Storage
+	RecvChains         *ReceiverChains
+	RK                 []byte
+	CKs                []byte
+	Ns                 uint32
+	PN                 uint32
+	DHs                [32]byte
+	DHr                [32]byte
+	DhRSet             bool
+	DHRatchetPerformed bool
 }
 
 // GetPrevState returns a copy of the previously recorded state.
 func (inv *Invariants) GetPrevState() PrevState {
 	return PrevState{
-		Ns:         inv.prevNs,
-		PN:         inv.prevPN,
-		RK:         copyBytes(inv.prevRK),
-		DHs:        inv.prevDHs,
-		DHr:        inv.prevDHr,
-		CKs:        copyBytes(inv.prevCKs),
-		RecvChains: inv.prevRecvChains,
-		MKSKIPPED:  inv.prevMKSKIPPED,
-		DhRSet:     inv.prevDhRSet,
+		Ns:                 inv.prevNs,
+		PN:                 inv.prevPN,
+		RK:                 copyBytes(inv.prevRK),
+		DHs:                inv.prevDHs,
+		DHr:                inv.prevDHr,
+		CKs:                copyBytes(inv.prevCKs),
+		RecvChains:         inv.prevRecvChains,
+		MKSKIPPED:          inv.prevMKSKIPPED,
+		DhRSet:             inv.prevDhRSet,
+		DHRatchetPerformed: inv.prevDHRatchetPerformed,
 	}
 }
 
@@ -89,6 +93,7 @@ func (inv *Invariants) Clear() {
 		inv.prevMKSKIPPED = nil
 	}
 	inv.prevDhRSet = false
+	inv.prevDHRatchetPerformed = false
 }
 
 // VerifySend verifies that Ns was incremented correctly after deriving a message key.

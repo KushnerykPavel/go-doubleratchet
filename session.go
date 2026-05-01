@@ -203,7 +203,7 @@ func (s *Session) Encrypt(plaintext, ad []byte) (Message, error) {
 // Config.RemoteIdentityKey are set, they are automatically prepended to
 // the MAC input, binding each message to the session's identity pair.
 func (s *Session) Decrypt(msg Message, ad []byte) ([]byte, error) {
-	s.invariants.Record(s.ns, s.pn, s.rk, s.dhs, s.dhr, s.cks, s.recvChains, s.mkSkipped, s.dhRSet)
+	s.invariants.Record(s.ns, s.pn, s.rk, s.dhs, s.dhr, s.cks, s.recvChains, s.mkSkipped, s.dhRSet, s.dhRatchetPerformed)
 
 	if msgKey, found := s.mkSkipped.Get(msg.Header.RatchetPublicKey, msg.Header.N); found {
 		headerBytes := encodeHeader(msg.Header)
@@ -595,6 +595,7 @@ func (s *Session) rollback() {
 	s.recvChains = prev.RecvChains
 	s.mkSkipped = prev.MKSKIPPED
 	s.dhRSet = prev.DhRSet
+	s.dhRatchetPerformed = prev.DHRatchetPerformed
 }
 
 // hasRemoteRatchetKey reports whether dhr has been set to a received ratchet public key.
